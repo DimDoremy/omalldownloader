@@ -9,7 +9,10 @@ members = [
   "crates/omad-cli",
   "crates/omad-app-tests",
 ]
-exclude = []
+# The vendored ODK and the patched xattr have their own manifests; excluding them keeps
+# cargo from treating them as members of this workspace (which would break their
+# `workspace = true` inheritance).
+exclude = ["vendor"]
 
 [workspace.package]
 edition = "2024"

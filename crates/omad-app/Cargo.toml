@@ -17,7 +17,7 @@ omad-store.workspace = true
 omad-rpc.workspace = true
 # ODK is not on crates.io and is pre-release: pinned to the commit this app was built
 # against. Bump deliberately and re-run the tests; ADP: one facade crate (ODK ADR 0028).
-odk = { git = "https://github.com/csfh/odk", rev = "8e8f2d25c1e76e7dbcb2d811c6ccc7a8db795289" }
+odk = { path = "../../vendor/odk/crates/odk" }
 tokio.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true

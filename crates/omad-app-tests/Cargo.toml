@@ -13,4 +13,4 @@ omad-core.workspace = true
 omad-engine.workspace = true
 omad-store.workspace = true
 gpui = { version = "=0.2.2", features = ["test-support"] }
-odk = { git = "https://github.com/csfh/odk", rev = "8e8f2d25c1e76e7dbcb2d811c6ccc7a8db795289", features = ["test-support"] }
+odk = { path = "../../vendor/odk/crates/odk", features = ["test-support"] }
