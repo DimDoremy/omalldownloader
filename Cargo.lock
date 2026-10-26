@@ -7559,7 +7559,6 @@ checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
 [[package]]
 name = "xattr"
 version = "0.2.3"
-source = "git+https://github.com/csfh/odk?rev=8e8f2d25c1e76e7dbcb2d811c6ccc7a8db795289#8e8f2d25c1e76e7dbcb2d811c6ccc7a8db795289"
 dependencies = [
  "libc",
 ]

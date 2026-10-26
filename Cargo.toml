@@ -52,7 +52,9 @@ opt-level = 1
 [profile.dev.package."*"]
 opt-level = 2
 
-# GPUI 0.2.2 does not compile on Linux without this; see ODK's patches/README.md and its
-# ADR 0029. The patched crate is ODK's own, pinned to the same commit as the dependency.
+# GPUI 0.2.2 does not compile on Linux without a patched `xattr` (libc dropped ENOATTR
+# there); see ODK's patches/README.md and its ADR 0029. ODK's patch redefines ENOATTR on
+# macOS, where libc still has it, so the copy in `vendor/xattr` carries the one-line fix that
+# keeps both platforms compiling.
 [patch.crates-io]
-xattr = { git = "https://github.com/csfh/odk", rev = "8e8f2d25c1e76e7dbcb2d811c6ccc7a8db795289" }
+xattr = { path = "vendor/xattr" }

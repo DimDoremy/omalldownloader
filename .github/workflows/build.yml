@@ -1,0 +1,72 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-24.04
+            artifact: omalldownloader-linux-x86_64
+            binaries: |
+              target/release/omalldownloader
+              target/release/omad
+          - name: macos-arm64
+            os: macos-14
+            artifact: omalldownloader-macos-arm64
+            binaries: |
+              target/release/omalldownloader
+              target/release/omad
+          - name: windows-x86_64
+            os: windows-latest
+            artifact: omalldownloader-windows-x86_64
+            binaries: |
+              target/release/omalldownloader.exe
+              target/release/omad.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: System libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-xcb-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev \
+            libxcb-xfixes0-dev libvulkan-dev libfontconfig1-dev libfreetype6-dev \
+            libasound2-dev libssl-dev pkg-config
+
+      - name: Metal toolchain (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # GPUI compiles its Metal shaders during the build, and recent Xcode splits the
+          # Metal toolchain out into a downloadable component.
+          xcodebuild -downloadComponent MetalToolchain || true
+          xcrun -sdk macosx metal --version || echo "metal toolchain still missing"
+
+      - name: Build
+        run: cargo build --release --workspace
+
+      - name: Test the engine and the core
+        run: cargo test --release -p omad-core -p omad-store -p omad-engine
+
+      - name: Upload the binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.binaries }}
+          if-no-files-found: error
