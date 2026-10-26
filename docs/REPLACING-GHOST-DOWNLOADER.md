@@ -56,12 +56,11 @@ Everything user-level, after a backup:
 2. **Load the extension into Edge once**:
 
    * open `edge://extensions`, turn on *Developer mode*, *Load unpacked*,
-     choose `~/.local/share/omalldownloader/extension`;
-   * open the app's **Extension** page, press *Start pairing*, and type the address and the
-     six-digit code into the extension popup.
+     choose `~/.local/share/omalldownloader/extension`.
 
-   Pairing is out of band by design: the desktop shows a code, the user types it, and the
-   secret never travels in clear. There is no way to pre-seed it from a script.
+   That is the whole setup, the way Ghost Downloader's extension worked: the extension looks
+   for `ws://127.0.0.1:14370`, the app trusts the first browser extension that connects and
+   hands it a secret, and every later connection proves that secret. Nothing to type.
 
 ## What is not covered
 

@@ -20,6 +20,10 @@ const STORAGE_KEYS = Object.freeze({
   pending: "pendingTasks",
 });
 
+/** Where the desktop listens unless the user changed it. Fixed, so a fresh install
+ *  connects with nothing to type. */
+export const DEFAULT_ADDRESS = "ws://127.0.0.1:14370";
+
 /** Reconnect delays, in milliseconds. */
 const BACKOFF = [500, 1000, 2000, 5000, 10000];
 
@@ -38,10 +42,15 @@ export class DesktopBridge extends EventTarget {
 
   async load() {
     const stored = await chrome.storage.local.get(Object.values(STORAGE_KEYS));
-    this.address = stored[STORAGE_KEYS.address] ?? "";
+    this.address = stored[STORAGE_KEYS.address] || DEFAULT_ADDRESS;
     this.secret = stored[STORAGE_KEYS.secret] ?? "";
     this.queue = stored[STORAGE_KEYS.pending] ?? [];
     return this;
+  }
+
+  /** The address is fixed, so a new profile is "paired" the moment it can connect. */
+  get configured() {
+    return Boolean(this.address);
   }
 
   /**
@@ -52,6 +61,9 @@ export class DesktopBridge extends EventTarget {
   async pair(address, secret) {
     const normalised = normaliseAddress(address);
     if (!normalised) { throw new Error("the address must be ws://127.0.0.1:<port>"); }
+    // Changing where we talk to means dropping the old socket first, or `connect` would
+    // return early on a socket that belongs to the previous address.
+    this.close();
     await chrome.storage.local.set({
       [STORAGE_KEYS.address]: normalised,
       [STORAGE_KEYS.secret]: secret,
@@ -74,7 +86,7 @@ export class DesktopBridge extends EventTarget {
   }
 
   get isPaired() {
-    return Boolean(this.address && this.secret);
+    return this.configured;
   }
 
   connect() {
@@ -133,8 +145,9 @@ export class DesktopBridge extends EventTarget {
   async onMessage(message) {
     switch (message.type) {
       case MSG.CHALLENGE: {
-        // A fresh challenge on every connection: the proof is never reused.
-        const proof = await hmacHex(this.secret, message.nonce);
+        // A fresh challenge on every connection: the proof is never reused. The first
+        // time there is no secret yet, and the desktop answers with one (`paired`).
+        const proof = this.secret ? await hmacHex(this.secret, message.nonce) : "";
         this.send({
           type: MSG.HELLO,
           major: PROTOCOL_MAJOR,
@@ -162,9 +175,14 @@ export class DesktopBridge extends EventTarget {
       case MSG.REMOVED:
         this.dispatchEvent(new CustomEvent("tasks", { detail: message }));
         return;
-      case MSG.PAIRED:
+      case MSG.PAIRED: {
+        // Trust on first use: the desktop generated this secret for us. Keep it, so every
+        // later connection proves it instead of asking again.
+        this.secret = message.secret ?? "";
+        await chrome.storage.local.set({ [STORAGE_KEYS.secret]: this.secret });
         this.dispatchEvent(new CustomEvent("paired", { detail: message }));
         return;
+      }
       default:
         this.dispatchEvent(new CustomEvent("message", { detail: message }));
     }

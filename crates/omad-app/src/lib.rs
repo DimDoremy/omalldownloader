@@ -157,8 +157,8 @@ pub trait EngineHost: Send + Sync + 'static {
     /// Open the finished file, or its folder, with the desktop's own handler.
     fn reveal(&self, id: u64);
     fn open_file(&self, id: u64);
-    fn begin_pairing(&self) -> Result<String, String>;
-    fn pairing_code(&self) -> Option<String>;
+    /// How many browser profiles have been trusted so far.
+    fn paired_browsers(&self) -> usize;
     fn bridge_summary(&self) -> String;
     fn set_notifier(&self, notifier: Notifier);
     fn set_referer(&self, referer: Option<String>);
@@ -255,11 +255,7 @@ impl Tasks {
             Page::Settings => "settings",
             Page::Extension => "extension",
         };
-        (
-            self.host.rows(),
-            page,
-            self.host.pairing_code().unwrap_or_default(),
-        )
+        (self.host.rows(), page, self.host.bridge_summary())
     }
 
     /// The label of a row's primary control, so a test can prove it follows the state.
@@ -716,16 +712,22 @@ impl Tasks {
 
     // ---------------------------------------------------------------- extension
 
-    fn extension_page(&self, cx: &mut Context<Self>) -> AnyElement {
-        let code = self.host.pairing_code();
+    fn extension_page(&self, _cx: &mut Context<Self>) -> AnyElement {
+        let paired = self.host.paired_browsers();
+        let status = match paired {
+            0 => "No browser has connected yet.".to_string(),
+            1 => "1 browser connected.".to_string(),
+            n => format!("{n} browsers connected."),
+        };
         let panel = v_flex()
             .p(Space::Lg)
             .gap(Space::Md)
             .child(
                 Text::new(
-                    "Load the extension from `extension/dist`, then type the address and the six digit \
-                     code shown here into its popup. The code is good for one pairing and is never \
-                     stored.",
+                    "The extension connects by itself: it looks for this address, and the \
+                     first time it does, this app trusts it and hands it a secret. Nothing to \
+                     type, and nothing to copy. A web page cannot take that place — only a \
+                     browser extension origin is accepted.",
                 )
                 .muted(),
             )
@@ -736,21 +738,16 @@ impl Tasks {
                     .child(Text::new("Address").muted())
                     .child(Text::new(self.host.bridge_summary())),
             )
-            .child(match &code {
-                Some(code) => v_flex()
-                    .gap(Space::Xs)
-                    .child(Text::new("Pairing code").muted())
-                    .child(Heading::new(code.clone()).level(1))
-                    .into_any_element(),
-                None => Button::new("pair")
-                    .label("Start pairing")
-                    .variant(ButtonVariant::Primary)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        let _ = this.host.begin_pairing();
-                        cx.notify();
-                    }))
-                    .into_any_element(),
-            });
+            .child(Text::new(status).muted())
+            .child(Separator::horizontal())
+            .child(Heading::new("Loading the extension").level(3))
+            .child(
+                Text::new(
+                    "Edge or Chrome: edge://extensions, turn on Developer mode, Load unpacked, \
+                     and choose ~/.local/share/omalldownloader/extension.",
+                )
+                .muted(),
+            );
 
         v_flex()
             .size_full()
@@ -1178,11 +1175,8 @@ mod tests {
         fn resume_all(&self) {}
         fn reveal(&self, _id: u64) {}
         fn open_file(&self, _id: u64) {}
-        fn begin_pairing(&self) -> Result<String, String> {
-            Err("not in a test".into())
-        }
-        fn pairing_code(&self) -> Option<String> {
-            None
+        fn paired_browsers(&self) -> usize {
+            0
         }
         fn bridge_summary(&self) -> String {
             String::new()

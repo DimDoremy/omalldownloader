@@ -98,7 +98,7 @@ struct Service {
     /// One stop channel per running task. Sending `true` asks the engine to pause at its
     /// next read; the engine then commits what it wrote and reports `Paused`.
     stops: Arc<Mutex<HashMap<u64, tokio::sync::watch::Sender<bool>>>>,
-    pairing_code: Arc<Mutex<Option<String>>>,
+
     #[allow(dead_code)]
     handle: Arc<Mutex<Option<omad_rpc::BridgeHandle>>>,
 }
@@ -133,23 +133,25 @@ impl Service {
         let bridge_addr = Arc::new(Mutex::new("not started".to_string()));
         let stops: Arc<Mutex<HashMap<u64, tokio::sync::watch::Sender<bool>>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let pairing_code: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
-        // The bridge: a random loopback port, one secret per origin the store knows.
+        // The bridge listens on one fixed loopback port, so a fresh extension connects
+        // with nothing to type; the store keeps the secret each origin was given.
         let secrets: HashMap<String, String> = store
             .paired_origins()?
             .into_iter()
-            .map(|origin| (origin, String::new()))
+            .filter(|(_, secret)| !secret.is_empty())
             .collect();
         let bridge_host = Arc::new(WindowBridge {
             board: board.clone(),
             commands: commands.clone(),
+            store: store.clone(),
         });
         let bridge = runtime.block_on(async {
             Bridge::start(
                 BridgeConfig {
-                    bind: "127.0.0.1:0".parse().unwrap(),
+                    bind: bridge_bind(),
                     paired_origins: secrets.keys().cloned().collect(),
+                    trust_first_origin: true,
                     server_version: env!("CARGO_PKG_VERSION").to_string(),
                 },
                 bridge_host,
@@ -170,7 +172,6 @@ impl Service {
             bridge_addr,
             download_dir: dirs.downloads.to_string_lossy().to_string(),
             stops: stops.clone(),
-            pairing_code,
             handle,
         };
 
@@ -534,14 +535,11 @@ impl EngineHost for Service {
         self.download_dir.clone()
     }
 
-    fn begin_pairing(&self) -> Result<String, String> {
-        // Pairing codes come from the bridge; the UI only shows what the bridge made.
-        // A dedicated channel would be tidier; this call is rare and immediate.
-        Err("pair from the extension tab is wired in the next increment".into())
-    }
-
-    fn pairing_code(&self) -> Option<String> {
-        self.pairing_code.lock().unwrap().clone()
+    fn paired_browsers(&self) -> usize {
+        self.store
+            .paired_origins()
+            .map(|origins| origins.len())
+            .unwrap_or(0)
     }
 
     fn bridge_summary(&self) -> String {
@@ -586,6 +584,19 @@ fn window_bounds_from_env() -> Option<odk::ui::gpui::WindowBounds> {
     ))
 }
 
+/// Where the extension bridge listens.
+///
+/// One fixed loopback port, so a freshly installed extension finds the app without being
+/// told anything. `OMAD_BRIDGE_PORT` overrides it; a port of 0 asks the system to choose,
+/// which is what the fallback does when the fixed one is taken.
+fn bridge_bind() -> std::net::SocketAddr {
+    let port = std::env::var("OMAD_BRIDGE_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(omad_rpc::server::DEFAULT_PORT);
+    std::net::SocketAddr::from(([127, 0, 0, 1], port))
+}
+
 /// Hands a path to the desktop's own opener: xdg-open, `open` on macOS, `explorer` on
 /// Windows. A failure is logged, never shown as a crash.
 fn open_with_desktop(path: &std::path::Path) {
@@ -605,9 +616,18 @@ fn open_with_desktop(path: &std::path::Path) {
 struct WindowBridge {
     board: Arc<TaskBoard>,
     commands: tokio::sync::mpsc::UnboundedSender<Command>,
+    /// Kept so a first-contact secret can be written down.
+    store: Store,
 }
 
 impl BridgeHost for WindowBridge {
+    fn remember_origin(&self, origin: &str, secret: &str) {
+        // Persisting here is what makes "connect once" survive a restart of either side.
+        if let Err(error) = self.store.remember_origin(origin, secret) {
+            tracing::warn!(%error, origin, "could not remember a paired origin");
+        }
+    }
+
     fn list(&self, _origin: &str) -> Vec<TaskView> {
         self.board
             .rows()

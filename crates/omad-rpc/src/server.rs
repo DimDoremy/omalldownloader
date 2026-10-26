@@ -30,21 +30,31 @@ const CODE_DIGITS: u32 = 6;
 pub struct BridgeConfig {
     /// Where to bind. Loopback only; a port of 0 asks the operating system for one.
     pub bind: SocketAddr,
-    /// Origins the user has already paired with. Anything else cannot even reach
-    /// pairing unless the desktop says yes to that origin.
+    /// Origins this profile already trusts, each with the secret it holds.
     pub paired_origins: Vec<String>,
+    /// When true, a browser extension that connects for the first time is trusted and
+    /// handed a secret without any code to type. This is what makes the extension
+    /// "just connect", the way Ghost Downloader's does; the origin and Host checks still
+    /// stop a web page, and every later connection proves the secret.
+    pub trust_first_origin: bool,
     pub server_version: String,
 }
 
 impl Default for BridgeConfig {
     fn default() -> Self {
         Self {
-            bind: SocketAddr::from(([127, 0, 0, 1], 0)),
+            bind: SocketAddr::from(([127, 0, 0, 1], DEFAULT_PORT)),
             paired_origins: Vec::new(),
+            trust_first_origin: true,
             server_version: env!("CARGO_PKG_VERSION").to_string(),
         }
     }
 }
+
+/// The port the extension looks for by default. A single well-known loopback port is what
+/// makes a fresh install work without typing anything; 0 in `bind` still means "let the
+/// system choose", for tests and for the fallback when this one is taken.
+pub const DEFAULT_PORT: u16 = 14370;
 
 /// A pairing waiting for the user to read a code off the desktop and type it into the
 /// extension.
@@ -71,6 +81,9 @@ pub enum BridgeError {
 /// task, so a slow command delays one extension, not the server. `origin` is passed on
 /// every call so the host can keep task lists and output paths per browser profile.
 pub trait BridgeHost: Send + Sync + 'static {
+    /// Called once per origin, when the bridge trusts it for the first time. The host
+    /// persists the pair so the extension does not have to be trusted again.
+    fn remember_origin(&self, _origin: &str, _secret: &str) {}
     fn list(&self, origin: &str) -> Vec<TaskView>;
     fn add(&self, origin: &str, task: omad_core::AddTask) -> Result<TaskView, String>;
     fn pause(&self, origin: &str, id: omad_core::TaskId) -> Result<(), String>;
@@ -361,28 +374,46 @@ async fn serve(
                         send(&mut ws, error(ErrorCode::Expired, "the challenge expired")).await?;
                         break;
                     }
-                    let expected = {
+                    let known = {
                         let secrets = shared.secrets.lock().await;
-                        secrets.get(&origin).map(|secret| hmac_hex(secret, &nonce))
+                        secrets.get(&origin).cloned()
                     };
-                    match expected {
-                        Some(expected)
-                            if constant_time_eq(expected.as_bytes(), proof.as_bytes()) =>
-                        {
-                            authenticated = true;
-                            send(
-                                &mut ws,
-                                ServerMessage::Welcome {
-                                    major: PROTOCOL_MAJOR,
-                                    minor: PROTOCOL_MINOR,
-                                    server_version: shared.config.server_version.clone(),
-                                },
-                            )
-                            .await?;
-                            let tasks = shared.host.list(&origin);
-                            send(&mut ws, ServerMessage::Tasks { tasks }).await?;
+                    // A browser extension we have not met before is trusted on first contact
+                    // and handed a secret, which is what makes the extension "just connect".
+                    // The Origin was checked at the handshake, so a web page cannot be here;
+                    // every later connection has to prove the secret.
+                    let accepted = match known {
+                        Some(secret) => {
+                            constant_time_eq(hmac_hex(&secret, &nonce).as_bytes(), proof.as_bytes())
                         }
-                        _ => {
+                        None if shared.config.trust_first_origin && proof.is_empty() => {
+                            let secret = random_token(32);
+                            shared
+                                .secrets
+                                .lock()
+                                .await
+                                .insert(origin.clone(), secret.clone());
+                            shared.host.remember_origin(&origin, &secret);
+                            send(&mut ws, ServerMessage::Paired { secret }).await?;
+                            true
+                        }
+                        None => false,
+                    };
+                    if accepted {
+                        authenticated = true;
+                        send(
+                            &mut ws,
+                            ServerMessage::Welcome {
+                                major: PROTOCOL_MAJOR,
+                                minor: PROTOCOL_MINOR,
+                                server_version: shared.config.server_version.clone(),
+                            },
+                        )
+                        .await?;
+                        let tasks = shared.host.list(&origin);
+                        send(&mut ws, ServerMessage::Tasks { tasks }).await?;
+                    } else {
+                        {
                             send(
                                 &mut ws,
                                 error(ErrorCode::Unauthenticated, "the proof does not match"),
@@ -525,7 +556,8 @@ fn error(code: ErrorCode, message: &str) -> ServerMessage {
 }
 
 async fn capabilities_for(origin: &str, shared: &Arc<Shared>) -> Vec<String> {
-    let paired = shared.secrets.lock().await.contains_key(origin);
+    let paired =
+        shared.secrets.lock().await.contains_key(origin) || shared.config.trust_first_origin;
     if paired {
         vec![
             "tasks.read".into(),

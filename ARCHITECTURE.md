@@ -67,9 +67,11 @@ looks at `Origin`. Both are fixed here (`omad-rpc/src/server.rs`):
   (checked before the upgrade completes — a web page is refused at the handshake);
 * authentication is `HMAC-SHA256(secret, nonce)`, with a fresh single-use nonce per
   connection and a 60 s expiry; the secret never travels again after pairing;
-* pairing is **out of band**: the desktop shows six digits, the user types them into the
-  extension, and both sides derive the proof from the code and the nonce. A client cannot
-  obtain the secret by asking;
+* pairing is **trust on first use**: the first browser extension to connect is trusted and
+  handed a secret, because the origin check already guarantees it is an extension and not a
+  page; every later connection proves the secret. This replaced a six-digit out-of-band code
+  at the user's request — Ghost Downloader's extension had no code at all, and the code made
+  a fresh install need two manual steps;
 * comparisons are constant time, and a failure tells the peer a status code and nothing else.
 
 Each of these is a test in `omad-rpc/tests/security.rs`, and the whole path — pair, authenticate,

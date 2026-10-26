@@ -98,13 +98,20 @@ export class FakeBridge {
 
   onMessage(socket, message, nonce) {
     if (message.type === "hello") {
-      const expected = createHmac("sha256", this.secret).update(nonce).digest("hex");
-      if (message.proof !== expected) {
-        this.send(socket, { type: "error", code: "unauthenticated", message: "bad proof" });
-        socket.destroy();
-        return;
+      // The same rule as the Rust bridge: a browser extension we have not met is trusted
+      // on first contact and handed the secret; later connections must prove it.
+      if (message.proof === "") {
+        this.authenticated = true;
+        this.send(socket, { type: "paired", secret: this.secret });
+      } else {
+        const expected = createHmac("sha256", this.secret).update(nonce).digest("hex");
+        if (message.proof !== expected) {
+          this.send(socket, { type: "error", code: "unauthenticated", message: "bad proof" });
+          socket.destroy();
+          return;
+        }
+        this.authenticated = true;
       }
-      this.authenticated = true;
       this.send(socket, { type: "welcome", major: 1, minor: 0, server_version: "fake" });
       this.send(socket, { type: "tasks", tasks: [] });
       return;

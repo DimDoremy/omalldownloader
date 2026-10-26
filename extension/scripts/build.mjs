@@ -32,11 +32,21 @@ for (const file of ["background.js", "background-state.js", "bridge.js", "downlo
   await cp(join(root, "src", file), join(dist, file));
 }
 
-// A last guard: no source file may hold a long-lived secret or a fixed port.
+// The port is fixed by design (so a fresh install connects with nothing to type), and it
+// must be the same number on both sides. The desktop's copy is the source of truth.
+const rust = await readFile(join(root, "..", "crates/omad-rpc/src/server.rs"), "utf8");
+const port = rust.match(/pub const DEFAULT_PORT: u16 = (\d+);/)?.[1];
+if (!port) {
+  throw new Error("crates/omad-rpc/src/server.rs has no DEFAULT_PORT");
+}
+const bridge = await readFile(join(dist, "bridge.js"), "utf8");
+if (!bridge.includes(`127.0.0.1:${port}`)) {
+  throw new Error(`bridge.js does not use the desktop's default port ${port}`);
+}
 for (const file of ["bridge.js", "background.js", "popup.js"]) {
   const text = await readFile(join(dist, file), "utf8");
-  if (/\b14370\b/.test(text)) {
-    throw new Error(`${file} still names the old fixed port`);
+  if (/localStorage\.setItem\(\s*["']secret/.test(text)) {
+    throw new Error(`${file} stores a secret outside chrome.storage`);
   }
 }
 

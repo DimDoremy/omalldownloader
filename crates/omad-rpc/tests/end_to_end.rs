@@ -297,6 +297,8 @@ async fn a_download_sent_by_the_extension_lands_on_disk() {
         BridgeConfig {
             bind: "127.0.0.1:0".parse().unwrap(),
             paired_origins: vec![],
+            // This test pairs by hand, so the automatic trust is off here.
+            trust_first_origin: false,
             server_version: "test".into(),
         },
         desktop.clone(),
@@ -391,8 +393,14 @@ async fn a_page_that_guesses_the_code_still_cannot_get_in() {
         board: Arc::new(Mutex::new(Vec::new())),
         runtime: tokio::runtime::Handle::current(),
     });
+    // Port 0: the default port belongs to the running app, and a test must not need it.
     let bridge = Bridge::start(
-        BridgeConfig::default(),
+        BridgeConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            // The manual pair path is what this test exercises, so automatic trust is off.
+            trust_first_origin: false,
+            ..BridgeConfig::default()
+        },
         desktop,
         std::collections::HashMap::new(),
     )

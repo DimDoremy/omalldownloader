@@ -135,11 +135,23 @@ chrome.runtime.onConnect.addListener((port) => {
         port.postMessage({ type: "page-links", links });
         break;
       }
-      case "pair":
-        port.postMessage({ type: "pair-required" });
+      case "reconnect":
+        desktopBridge.close();
+        desktopBridge.connect();
+        port.postMessage({ type: "state", connected: desktopBridge.ready, address: desktopBridge.address });
         break;
       default:
         port.postMessage({ type: "error", message: "unknown request" });
     }
   });
+});
+
+// The popup asks for a reconnect after the user changes the port.
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "reconnect") {
+    desktopBridge.close();
+    desktopBridge.connect();
+    sendResponse({ ok: true });
+  }
+  return false;
 });

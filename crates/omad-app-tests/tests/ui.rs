@@ -19,7 +19,6 @@ struct FakeHost {
     removed: Mutex<Vec<u64>>,
     opened: Mutex<Vec<u64>>,
     revealed: Mutex<Vec<u64>>,
-    code: Mutex<Option<String>>,
     pairing_started: Mutex<u32>,
     notifier: Mutex<Option<Notifier>>,
     referer: Mutex<Option<String>>,
@@ -70,14 +69,8 @@ impl EngineHost for FakeHost {
     fn open_file(&self, id: u64) {
         self.opened.lock().unwrap().push(id);
     }
-    fn begin_pairing(&self) -> Result<String, String> {
-        *self.pairing_started.lock().unwrap() += 1;
-        let code = "123456".to_string();
-        *self.code.lock().unwrap() = Some(code.clone());
-        Ok(code)
-    }
-    fn pairing_code(&self) -> Option<String> {
-        self.code.lock().unwrap().clone()
+    fn paired_browsers(&self) -> usize {
+        *self.pairing_started.lock().unwrap() as usize
     }
     fn bridge_summary(&self) -> String {
         "ws://127.0.0.1:54321".into()
@@ -348,27 +341,20 @@ fn an_empty_link_is_not_sent() {
 }
 
 #[test]
-fn the_extension_page_shows_the_bridge_and_a_pairing_code() {
+fn the_extension_page_shows_the_address_and_connects_without_a_code() {
     let host = FakeHost::with_rows(vec![]);
     let mut cx = TestAppContext::single();
     let (visual, entity) = open(&mut cx, host.clone());
 
     click(visual, "nav-extension/button");
-    let (_, page, code) = entity.read_with(visual, |v, _| v.summary());
+    let (_, page, address) = entity.read_with(visual, |v, _| v.summary());
     assert_eq!(page, "extension");
-    assert!(code.is_empty(), "no code before one is asked for");
-
-    click(visual, "pair/button");
-    let (_, _, code) = entity.read_with(visual, |v, _| v.summary());
     assert_eq!(
-        code, "123456",
-        "the code the host returned is the one shown"
+        address, "ws://127.0.0.1:54321",
+        "the fixed address is shown"
     );
-    assert_eq!(
-        *host.pairing_started.lock().unwrap(),
-        1,
-        "asked exactly once"
-    );
+    // There is nothing to type and no button to press: the extension connects by itself.
+    assert!(bounds(visual, "pair/button").is_none(), "no pairing button");
 }
 
 #[test]

@@ -11,16 +11,15 @@
     <span id="status" class="status" data-state="unknown">…</span>
   </header>
 
-  <section id="pairing" hidden>
+  <section id="offline" hidden>
     <p class="hint">
-      Open OmaLLDownloader, go to <strong>Browser extension</strong>, and type the address and
-      code it shows. The code is good for one pairing.
+      OmaLLDownloader is not running, or is listening on another port. Start it and this
+      page reconnects by itself. The address is fixed at
+      <code>ws://127.0.0.1:14370</code>.
     </p>
     <label for="address">Address</label>
-    <input id="address" type="text" placeholder="ws://127.0.0.1:54321" spellcheck="false" />
-    <label for="code">Code</label>
-    <input id="code" type="text" inputmode="numeric" placeholder="123456" autocomplete="off" />
-    <button id="pair" class="primary">Pair</button>
+    <input id="address" type="text" spellcheck="false" />
+    <button id="reconnect" class="primary">Reconnect</button>
     <p id="pair-error" class="error" hidden></p>
   </section>
 
@@ -42,7 +41,7 @@
 
   <footer>
     <button id="send-page" class="secondary">Send this page</button>
-    <button id="unpair" class="link" hidden>Unpair</button>
+    <button id="reset" class="link" hidden>Forget this browser</button>
   </footer>
 
   <script type="module" src="popup.js"></script>

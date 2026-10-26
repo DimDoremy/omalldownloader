@@ -8,14 +8,13 @@
  */
 
 import { MSG } from "./protocol.js";
-import { hmacHex } from "./protocol.js";
+import { DEFAULT_ADDRESS } from "./bridge.js";
 
 const el = {
   status: document.getElementById("status"),
-  pairing: document.getElementById("pairing"),
+  offline: document.getElementById("offline"),
   address: document.getElementById("address"),
-  code: document.getElementById("code"),
-  pair: document.getElementById("pair"),
+  reconnect: document.getElementById("reconnect"),
   pairError: document.getElementById("pair-error"),
   connected: document.getElementById("connected"),
   tasks: document.getElementById("tasks"),
@@ -24,7 +23,7 @@ const el = {
   minSize: document.getElementById("min-size"),
   skip: document.getElementById("skip"),
   sendPage: document.getElementById("send-page"),
-  unpair: document.getElementById("unpair"),
+  reset: document.getElementById("reset"),
 };
 
 const port = chrome.runtime.connect({ name: "omalldownloader" });
@@ -64,11 +63,12 @@ port.postMessage({ type: "state" });
 
 function paintStatus(connected, isPaired) {
   el.status.dataset.state = connected ? "connected" : "offline";
-  el.status.textContent = connected ? "Desktop connected" : isPaired ? "Desktop offline" : "Not paired";
-  el.pairing.hidden = isPaired;
+  // There is nothing to pair: the extension is either talking to the desktop or not.
+  el.status.textContent = connected ? "Desktop connected" : "Desktop offline";
+  el.offline.hidden = connected;
   el.connected.hidden = !isPaired;
-  el.unpair.hidden = !isPaired;
-  if (isPaired && address) { el.address.value = address; }
+  el.reset.hidden = !isPaired;
+  el.address.value = address || DEFAULT_ADDRESS;
 }
 
 function paintSettings(settings) {
@@ -175,59 +175,29 @@ el.sendPage.addEventListener("click", async () => {
   port.postMessage({ type: "take-link", task: { url: tab.url, referer: tab.url } });
 });
 
-el.unpair.addEventListener("click", async () => {
-  await chrome.storage.local.set({ bridgeAddress: "", bridgeSecret: "" });
-  paired = false;
-  paintStatus(false, false);
-  showResult("Unpaired. Restart the desktop app to pair again.");
+el.reset.addEventListener("click", async () => {
+  await chrome.storage.local.set({ bridgeAddress: DEFAULT_ADDRESS, bridgeSecret: "" });
+  portraitReset();
 });
 
+/** Forget the secret and start over; the desktop trusts a fresh extension again. */
+function portraitReset() {
+  paired = false;
+  paintStatus(false, false);
+  showResult("Forgotten. Reopen the popup to connect again.");
+}
+
+
 /**
- * Pairing, entirely through the worker: the popup signs the desktop's challenge and hands
- * the derived secret to the worker, which stores it. The *code* itself is not stored.
+ * Reconnect, and remember the address if the user changed the port.
+ * There is no code: the desktop trusts a browser extension on first contact and hands it
+ * a secret, which the worker stores for every later connection.
  */
-el.pair.addEventListener("click", async () => {
-  const candidate = el.address.value.trim();
-  const code = el.code.value.trim();
-  if (!candidate || !/^\d{6}$/.test(code)) {
-    showResult("Type the address and the six digit code from the desktop.");
-    return;
-  }
-  el.pair.disabled = true;
-  showResult("");
-  try {
-    const url = /^wss?:\/\//i.test(candidate) ? candidate : `ws://${candidate}`;
-    const socket = new WebSocket(url);
-    const outcome = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("The desktop did not answer.")), 10000);
-      socket.addEventListener("message", async (event) => {
-        const message = JSON.parse(String(event.data));
-        if (message.type !== MSG.CHALLENGE) { return; }
-        socket.send(JSON.stringify({
-          type: MSG.PAIR,
-          origin: chrome.runtime.getURL("").replace(/\/$/, ""),
-          code_proof: await hmacHex(code, message.nonce),
-        }));
-      });
-      socket.addEventListener("message", (event) => {
-        const message = JSON.parse(String(event.data));
-        if (message.type === MSG.PAIRED) { clearTimeout(timer); resolve(message.secret); }
-        if (message.type === MSG.ERROR) { clearTimeout(timer); reject(new Error(message.message)); }
-      });
-      socket.addEventListener("error", () => {
-        clearTimeout(timer);
-        reject(new Error("Could not reach the desktop. Is OmaLLDownloader running?"));
-      });
-    });
-    socket.close();
-    await chrome.storage.local.set({ bridgeAddress: url, bridgeSecret: outcome });
-    paired = true;
-    paintStatus(true, true);
-    showResult("Paired. Restarting the connection…");
-    chrome.runtime.sendMessage({ type: "reconnect" }).catch(() => {});
-  } catch (error) {
-    showResult(error instanceof Error ? error.message : String(error));
-  } finally {
-    el.pair.disabled = false;
-  }
+el.reconnect.addEventListener("click", async () => {
+  const address = el.address.value.trim() || DEFAULT_ADDRESS;
+  await chrome.storage.local.set({ bridgeAddress: address });
+  showResult("Connecting…");
+  chrome.runtime.sendMessage({ type: "reconnect" }).catch(() => {});
 });
+
+el.address.value = DEFAULT_ADDRESS;

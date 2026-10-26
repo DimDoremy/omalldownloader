@@ -65,6 +65,7 @@ async fn start(paired: bool, secret: Option<&str>) -> omad_rpc::BridgeHandle {
     let config = BridgeConfig {
         bind: "127.0.0.1:0".parse().unwrap(),
         paired_origins: if paired { vec![origin] } else { vec![] },
+        trust_first_origin: true,
         server_version: "test".into(),
     };
     Bridge::start(config, Arc::new(FakeHost), secrets)
@@ -153,77 +154,56 @@ async fn dns_rebinding_hosts_are_refused() {
 }
 
 #[tokio::test]
-async fn pairing_gives_a_secret_but_only_with_the_code() {
+async fn a_first_contact_extension_is_trusted_and_given_a_secret() {
+    // What "the extension just connects" means: no code, one connection, a secret.
     let bridge = start(false, None).await;
-    let code = bridge.begin_pairing().await;
     let mut ws = connect(bridge.addr(), "chrome-extension://testextensionid")
         .await
         .unwrap();
 
     let challenge: ServerMessage = recv(&mut ws).await;
-    let nonce = match challenge {
-        ServerMessage::Challenge {
-            nonce,
-            capabilities,
-            ..
-        } => {
-            assert_eq!(capabilities, vec!["pair".to_string()]);
-            nonce
-        }
-        other => panic!("expected a challenge, got {other:?}"),
-    };
+    assert!(matches!(challenge, ServerMessage::Challenge { .. }));
 
-    // A wrong code must not yield a secret.
-    let wrong = hmac_hex("999999", &nonce);
     ws.send(Message::Text(
-        serde_json::to_string(&ClientMessage::Pair {
-            origin: "chrome-extension://testextensionid".into(),
-            code_proof: wrong,
+        serde_json::to_string(&ClientMessage::Hello {
+            major: omad_rpc::PROTOCOL_MAJOR,
+            minor: omad_rpc::PROTOCOL_MINOR,
+            extension_version: "1.0.0".into(),
+            // No secret yet, so no proof: the desktop answers with one.
+            proof: String::new(),
         })
         .unwrap()
         .into(),
     ))
     .await
     .unwrap();
-    let rejection: ServerMessage = recv(&mut ws).await;
-    match rejection {
-        ServerMessage::Error { code, .. } => {
-            assert_eq!(code.as_str(), ErrorCode::BadProof.as_str())
-        }
-        other => panic!("expected an error, got {other:?}"),
-    }
-    assert_eq!(bridge.paired_count().await, 0);
 
-    // The right code gives the secret.
-    let _right = hmac_hex(&code, &nonce);
-    // Reconnect for a fresh nonce, as a real client would.
-    drop(ws);
-    let mut ws = connect(bridge.addr(), "chrome-extension://testextensionid")
-        .await
-        .unwrap();
-    let challenge: ServerMessage = recv(&mut ws).await;
-    let nonce = match challenge {
-        ServerMessage::Challenge { nonce, .. } => nonce,
-        other => panic!("expected a challenge, got {other:?}"),
-    };
-    ws.send(Message::Text(
-        serde_json::to_string(&ClientMessage::Pair {
-            origin: "chrome-extension://testextensionid".into(),
-            code_proof: hmac_hex(&code, &nonce),
-        })
-        .unwrap()
-        .into(),
-    ))
-    .await
-    .unwrap();
     let paired: ServerMessage = recv(&mut ws).await;
-    match paired {
-        ServerMessage::Paired { secret } => {
-            assert_eq!(secret.len(), 64);
-            assert!(bridge.is_paired("chrome-extension://testextensionid").await);
-        }
-        other => panic!("expected Paired, got {other:?}"),
-    }
+    let secret = match paired {
+        ServerMessage::Paired { secret } => secret,
+        other => panic!("expected a secret on first contact, got {other:?}"),
+    };
+    assert_eq!(secret.len(), 64);
+    let welcome: ServerMessage = recv(&mut ws).await;
+    assert!(
+        matches!(welcome, ServerMessage::Welcome { .. }),
+        "got {welcome:?}"
+    );
+    assert!(bridge.is_paired("chrome-extension://testextensionid").await);
+    bridge.shutdown();
+}
+
+#[tokio::test]
+async fn a_page_origin_cannot_use_first_contact() {
+    // The handshake refuses a page before any of this, so the automatic trust can only
+    // ever apply to an extension origin.
+    let bridge = start(false, None).await;
+    assert!(
+        connect(bridge.addr(), "https://evil.example")
+            .await
+            .is_err()
+    );
+    assert_eq!(bridge.paired_count().await, 0, "nothing was trusted");
     bridge.shutdown();
 }
 

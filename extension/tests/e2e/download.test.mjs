@@ -201,14 +201,17 @@ test("a browser download is handed to the desktop bridge", async (t) => {
       break;
     }
     if (Date.now() > hookDeadline) {
-      throw new Error("the worker never exposed its pairing hook");
+      throw new Error("the worker never exposed its test hook");
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+
+  // No code to type: point the extension at the bridge and let it connect. The first
+  // contact is trusted and the secret arrives in a `paired` message.
   const paired = await workerCdp.evaluate(
-    `globalThis.__gfPairForTest(${JSON.stringify(bridge.address)}, "secret-for-the-test")`,
+    `globalThis.__gfPairForTest(${JSON.stringify(bridge.address)}, "")`,
   );
-  assert.equal(paired, true, "the extension believes it is paired");
+  assert.equal(paired, true, "the extension considers itself connected");
   const secondCdp = workerCdp;
 
   // The bridge sees a connection that proves itself with an HMAC over its nonce.

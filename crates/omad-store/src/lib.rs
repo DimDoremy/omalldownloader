@@ -157,6 +157,7 @@ impl Store {
             -- The browser profiles the user has paired with, one row per origin.
             CREATE TABLE IF NOT EXISTS paired_origins (
                 origin     TEXT PRIMARY KEY,
+                secret     TEXT NOT NULL DEFAULT '',
                 granted_at INTEGER NOT NULL
             );
             "#,
@@ -169,6 +170,22 @@ impl Store {
         if !has_column {
             conn.execute_batch(
                 "ALTER TABLE tasks ADD COLUMN allow_private INTEGER NOT NULL DEFAULT 0",
+            )?;
+        }
+        let has_secret: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('paired_origins') WHERE name = 'secret'")?
+            .exists([])?;
+        if !has_secret {
+            conn.execute_batch(
+                "ALTER TABLE paired_origins ADD COLUMN secret TEXT NOT NULL DEFAULT ''",
+            )?;
+        }
+        let has_secret: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('paired_origins') WHERE name = 'secret'")?
+            .exists([])?;
+        if !has_secret {
+            conn.execute_batch(
+                "ALTER TABLE paired_origins ADD COLUMN secret TEXT NOT NULL DEFAULT ''",
             )?;
         }
         let has_speed: bool = conn
@@ -325,21 +342,23 @@ impl Store {
         Ok(())
     }
 
-    pub fn remember_origin(&self, origin: &str) -> Result<(), StoreError> {
+    pub fn remember_origin(&self, origin: &str, secret: &str) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO paired_origins (origin, granted_at) VALUES (?1, ?2)
-             ON CONFLICT(origin) DO NOTHING",
-            params![origin, now()],
+            "INSERT INTO paired_origins (origin, secret, granted_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(origin) DO UPDATE SET secret = excluded.secret",
+            params![origin, secret, now()],
         )?;
         Ok(())
     }
 
-    pub fn paired_origins(&self) -> Result<Vec<String>, StoreError> {
+    /// The origins this profile trusts, with the secret each one proves itself with.
+    pub fn paired_origins(&self) -> Result<Vec<(String, String)>, StoreError> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT origin FROM paired_origins ORDER BY granted_at")?;
+        let mut stmt =
+            conn.prepare("SELECT origin, secret FROM paired_origins ORDER BY granted_at")?;
         Ok(stmt
-            .query_map([], |r| r.get(0))?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<Result<Vec<_>, _>>()?)
     }
 }
@@ -452,11 +471,16 @@ mod tests {
     #[test]
     fn paired_origins_are_remembered_once() {
         let store = Store::open_in_memory().unwrap();
-        store.remember_origin("chrome-extension://abc").unwrap();
-        store.remember_origin("chrome-extension://abc").unwrap();
+        store
+            .remember_origin("chrome-extension://abc", "secret-1")
+            .unwrap();
+        // A second grant replaces the secret: the newest one is what the extension holds.
+        store
+            .remember_origin("chrome-extension://abc", "secret-2")
+            .unwrap();
         assert_eq!(
             store.paired_origins().unwrap(),
-            vec!["chrome-extension://abc"]
+            vec![("chrome-extension://abc".to_string(), "secret-2".to_string())]
         );
     }
 
