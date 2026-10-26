@@ -89,6 +89,12 @@ patches ODK needed for the non-Linux builds, and the evidence from the Mac are i
 [`docs/PLATFORMS.md`](docs/PLATFORMS.md). CI builds all three on every push and uploads the
 binaries as artifacts.
 
+![the extension page](docs/assets/extension-page.png)
+
+The extension looks for `ws://127.0.0.1:14370` on its own. The first time it connects, the
+app trusts it and hands it a secret; from then on every connection proves that secret. There
+is nothing to type — the same "it just works" the Ghost Downloader extension had.
+
 ## Looking at the UI with a computer-use agent
 
 `tools/cua/` runs CUA's computer server against this machine and a small look→act loop on

@@ -74,6 +74,13 @@ looks at `Origin`. Both are fixed here (`omad-rpc/src/server.rs`):
   a fresh install need two manual steps;
 * comparisons are constant time, and a failure tells the peer a status code and nothing else.
 
+The trade this makes, stated plainly: the first `chrome-extension://` origin to connect is
+trusted. A page cannot present one, and the `Host` check still refuses a rebinding name, but
+any *extension* that speaks the protocol before yours does would be trusted. Pinning the
+extension id after the first pair is the obvious next step; the user asked for the
+zero-step experience Ghost Downloader's extension had, and this is the smallest design that
+gives it while keeping the page and rebinding walls.
+
 Each of these is a test in `omad-rpc/tests/security.rs`, and the whole path — pair, authenticate,
 add, download, verify bytes — is one test in `omad-rpc/tests/end_to_end.rs`.
 
