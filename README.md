@@ -82,6 +82,13 @@ The popup lists every task with its status, progress, size and live speed, offer
 Resume and Remove per task, and shows a running total at the top. It reads the same
 `omad tasks --json` the window and the CLI read.
 
+## Platforms
+
+Linux and macOS build and run; Windows builds in CI and has not been run. The details, the
+patches ODK needed for the non-Linux builds, and the evidence from the Mac are in
+[`docs/PLATFORMS.md`](docs/PLATFORMS.md). CI builds all three on every push and uploads the
+binaries as artifacts.
+
 ## Looking at the UI with a computer-use agent
 
 `tools/cua/` runs CUA's computer server against this machine and a small look→act loop on
