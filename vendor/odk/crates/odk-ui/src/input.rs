@@ -524,12 +524,19 @@ impl InputState {
 
     /// The selection is the user's own: write it to the primary selection, the Wayland way,
     /// unless the field hides its text.
+    ///
+    /// Only X11/Wayland have a primary selection; elsewhere there is nothing to publish to.
+    /// (Local patch to ODK: upstream calls `write_to_primary`, which does not exist on
+    /// macOS or Windows.)
     fn publish_selection(&self, cx: &mut Context<Self>) {
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         if !self.masked && !self.editor.selection().is_empty() {
             cx.write_to_primary(ClipboardItem::new_string(
                 self.editor.selected_text().to_owned(),
             ));
         }
+        #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+        let _ = cx;
     }
 
     fn navigate(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Editor)) {
