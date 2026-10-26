@@ -24,7 +24,10 @@
 
 mod color;
 pub mod component;
+#[cfg(unix)]
 mod compositor;
+#[cfg(not(unix))]
+mod compositor_stub as compositor;
 mod discovery;
 mod error;
 pub mod foundation;
