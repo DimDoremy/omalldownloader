@@ -28,6 +28,34 @@ pub enum Kind {
     Hls,
     Dash,
     Ftp,
+    /// A magnet link or a `.torrent`, downloaded by the in-process BitTorrent engine.
+    Bt,
+}
+
+/// An `ed2k://` link: not a URL the `url` crate can even parse (the `|` separators are not
+/// legal in a host), and not something this engine downloads. It is handed to a local
+/// eD2k client instead, so the decision is made on the raw string.
+pub fn is_ed2k(raw: &str) -> bool {
+    raw.len() > 7 && raw[..7].eq_ignore_ascii_case("ed2k://")
+}
+
+/// Hands an `ed2k://` link to a local client.
+///
+/// There is no maintained eD2k implementation in Rust (the `ed2k` crate is the hash
+/// function), so this follows the same route every Linux download manager does: the link
+/// goes to `amule`, the eMule-compatible client in the Arch repositories, or to whatever
+/// `OMAD_ED2K_CLIENT` names.
+pub fn delegate_ed2k(raw: &str) -> Result<String, PackError> {
+    if !is_ed2k(raw) {
+        return Err(PackError::Unsupported(format!("{raw} is not an ed2k link")));
+    }
+    let client = std::env::var("OMAD_ED2K_CLIENT").unwrap_or_else(|_| "amule".to_string());
+    match std::process::Command::new(&client).arg(raw).spawn() {
+        Ok(_) => Ok(client),
+        Err(error) => Err(PackError::Missing(format!(
+            "eD2k needs `{client}` on PATH (install amule, or set OMAD_ED2K_CLIENT): {error}"
+        ))),
+    }
 }
 
 /// Decides by scheme, then by what the path ends in. A query string is ignored, because a
@@ -35,7 +63,7 @@ pub enum Kind {
 pub fn kind_of(url: &Url) -> Kind {
     match url.scheme() {
         "ftp" | "ftps" => return Kind::Ftp,
-        "magnet" => return Kind::Http, // not supported yet; the engine refuses it later
+        "magnet" => return Kind::Bt,
         _ => {}
     }
     let path = url.path().to_ascii_lowercase();
@@ -43,6 +71,8 @@ pub fn kind_of(url: &Url) -> Kind {
         Kind::Hls
     } else if path.ends_with(".mpd") {
         Kind::Dash
+    } else if path.ends_with(".torrent") {
+        Kind::Bt
     } else {
         Kind::Http
     }
@@ -99,6 +129,9 @@ pub enum PackError {
     Empty,
     #[error("this build cannot download {0} yet")]
     Unsupported(String),
+    /// A protocol this build delegates to another program, which is not installed.
+    #[error("{0}")]
+    Missing(String),
     #[error("the user paused the task")]
     Paused,
     #[error("io error: {0}")]
@@ -433,6 +466,7 @@ pub async fn run_pack(ctx: &PackContext<'_>, url: &Url) -> Result<u64, PackError
         Kind::Hls => run_hls(ctx, url).await,
         Kind::Dash => run_dash(ctx, url).await,
         Kind::Ftp => run_ftp(ctx, url).await,
+        Kind::Bt => run_bt(ctx, url).await,
         Kind::Http => Err(PackError::Unsupported("handled by the engine".into())),
     }
 }
@@ -442,7 +476,90 @@ pub fn to_engine(error: PackError) -> EngineError {
     match error {
         PackError::Paused => EngineError::Stopped,
         PackError::Unsupported(what) => EngineError::Transport(format!("unsupported: {what}")),
+        PackError::Missing(what) => EngineError::Transport(what),
         other => EngineError::Transport(other.to_string()),
+    }
+}
+
+/// BitTorrent: a magnet link or a `.torrent`, downloaded by librqbit in this process.
+///
+/// A torrent is not "a file of ordered pieces" like the other packs — it may hold several
+/// files and it fetches them from peers — so the contract differs in one place: the target
+/// is a **directory** and progress is the torrent's own aggregate. Everything else is the
+/// same: the sink hears about progress, the stop signal pauses the torrent, and the task is
+/// only reported complete when librqbit says every piece is verified.
+pub async fn run_bt(ctx: &PackContext<'_>, url: &Url) -> Result<u64, PackError> {
+    use librqbit::{AddTorrent, AddTorrentOptions, Session};
+
+    // The task's file path is `<download folder>/<name>.<ext>`; a torrent writes a directory
+    // beside it, named after the torrent, so nothing collides.
+    let folder = ctx
+        .target
+        .parent()
+        .ok_or_else(|| PackError::Io("the download folder has no parent".into()))?
+        .to_path_buf();
+    std::fs::create_dir_all(&folder).map_err(|e| PackError::Io(e.to_string()))?;
+
+    let session = Session::new(folder)
+        .await
+        .map_err(|e| PackError::Transport(format!("could not start the torrent session: {e}")))?;
+
+    // Adding a magnet waits for metadata, which can take as long as the swarm does; a pause
+    // during that wait has to win, or the task would be unstoppable.
+    let mut stop = ctx.stop.clone();
+    let added = tokio::select! {
+        added = session.add_torrent(
+            AddTorrent::Url(url.as_str().into()),
+            Some(AddTorrentOptions {
+                // Resuming a torrent writes over files it already verified.
+                overwrite: true,
+                ..Default::default()
+            }),
+        ) => added.map_err(|e| PackError::Transport(format!("could not add the torrent: {e}")))?,
+        _ = async {
+            loop {
+                if *stop.borrow() { break; }
+                if stop.changed().await.is_err() { break; }
+            }
+        } => return Err(PackError::Paused),
+    };
+
+    let handle = added.into_handle().ok_or_else(|| {
+        PackError::Unsupported("that torrent was only listed, not downloaded".into())
+    })?;
+
+    let mut last = 0u64;
+    let started = Instant::now();
+    loop {
+        if stopped(&ctx.stop) {
+            let _ = session.pause(&handle).await;
+            return Err(PackError::Paused);
+        }
+        let stats = handle.stats();
+        if let Some(error) = &stats.error {
+            return Err(PackError::Transport(error.clone()));
+        }
+        let received = stats.progress_bytes;
+        let total = if stats.total_bytes > 0 {
+            Some(stats.total_bytes)
+        } else {
+            None
+        };
+        let elapsed = started.elapsed().as_secs_f64().max(0.001);
+        ctx.sink.on_progress(
+            ctx.id,
+            &Progress {
+                received,
+                total,
+                speed: ((received - last) as f64 / elapsed) as u64,
+            },
+        );
+        last = received;
+        ctx.sink.on_commit(ctx.id, received, total, 0);
+        if stats.finished {
+            return Ok(received);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
 }
 
@@ -464,6 +581,22 @@ mod tests {
         assert_eq!(kind_of(&url("https://example.com/stream.mpd")), Kind::Dash);
         assert_eq!(kind_of(&url("ftp://example.com/a.bin")), Kind::Ftp);
         assert_eq!(kind_of(&url("ftps://example.com/a.bin")), Kind::Ftp);
+    }
+
+    #[test]
+    fn a_magnet_or_a_torrent_file_is_bit_torrent_and_an_ed2k_link_is_ed2k() {
+        assert_eq!(
+            kind_of(&url(
+                "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567"
+            )),
+            Kind::Bt
+        );
+        assert_eq!(kind_of(&url("https://example.com/a.torrent")), Kind::Bt);
+        // ed2k is not a Url at all; the raw string decides, and that is tested below.
+        assert!(is_ed2k(
+            "ed2k://|file|a.iso|1024|0123456789ABCDEF0123456789ABCDEF|/"
+        ));
+        assert!(!is_ed2k("magnet:?xt=urn:btih:0123"));
     }
 
     #[test]

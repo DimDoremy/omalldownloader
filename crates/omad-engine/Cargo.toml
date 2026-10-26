@@ -22,5 +22,10 @@ uuid.workspace = true
 futures-util.workspace = true
 bytes.workspace = true
 
+# The BitTorrent side: a pure-Rust client, so a magnet link needs no daemon and no external
+# binary on any of the three platforms. DHT and trackers are on by default, which is what
+# makes a magnet link work at all.
+librqbit = { version = "9", default-features = false, features = ["default-tls"] }
+
 [dev-dependencies]
 tempfile.workspace = true

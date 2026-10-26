@@ -153,6 +153,16 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             name,
             connections,
         } => {
+            // An ed2k link is not a URL this program can hold; hand it to a local eD2k client.
+            if omad_engine::packs::is_ed2k(&url) {
+                match omad_engine::packs::delegate_ed2k(&url) {
+                    Ok(client) => {
+                        println!("handed to {client}: it will download into its own folder");
+                        return Ok(());
+                    }
+                    Err(error) => anyhow::bail!("{error}"),
+                }
+            }
             let parsed = parse_url(&url)?;
             // The server usually names the file better than the URL does; a name on the
             // command line beats both. Either way it goes through `sanitize`.
@@ -406,14 +416,11 @@ fn outcome_label(outcome: Outcome) -> &'static str {
 
 fn parse_url(text: &str) -> anyhow::Result<url::Url> {
     let url = url::Url::parse(text).map_err(|e| anyhow::anyhow!("{text} is not a URL: {e}"))?;
-    // http(s) is the engine's own path, and a playlist on top of it; ftp and ftps go to the
-    // FTP pack. Magnet and eD2k are refused with a reason rather than failing later.
+    // http(s) is the engine's own path, a playlist or a torrent on top of it, ftp goes to
+    // the FTP pack and magnet to the BitTorrent engine. ed2k never reaches here: it is not a
+    // URL `url` can parse and is delegated from `add`.
     match url.scheme() {
-        "http" | "https" | "ftp" | "ftps" => Ok(url),
-        "magnet" | "ed2k" => anyhow::bail!(
-            "{} links are not supported yet; this build handles http, https, ftp and HLS/DASH playlists",
-            url.scheme()
-        ),
+        "http" | "https" | "ftp" | "ftps" | "magnet" => Ok(url),
         other => anyhow::bail!("{other} is not a scheme this downloader handles"),
     }
 }

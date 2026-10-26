@@ -329,6 +329,11 @@ async fn add_and_run(
     _referer: Option<String>,
     allow_private: bool,
 ) -> anyhow::Result<()> {
+    // An ed2k link is not a URL this program can hold; a local client downloads it instead.
+    if omad_engine::packs::is_ed2k(&url) {
+        omad_engine::packs::delegate_ed2k(&url).map_err(|error| anyhow::anyhow!("{error}"))?;
+        return Ok(());
+    }
     let parsed = url::Url::parse(&url)?;
     let name = omad_core::filename::from_url(&parsed);
     // The path is built from a validated root and a sanitised name; the caller never

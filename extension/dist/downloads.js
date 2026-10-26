@@ -82,6 +82,7 @@ function isSkipped(url, filename) {
  */
 export async function onDeterminingFilename(item, suggest) {
   // Bytes the user did not ask for a file from (a blob, a data URI) stay in the browser.
+  // A magnet link never reaches the downloads API, but a .torrent over http does.
   if (!/^https?:/i.test(item.url)) { suggest(); return; }
   if (item.byExtensionId) { suggest(); return; }
 
@@ -162,7 +163,11 @@ export function openDesktop() {
 
 /** Takes one link the user chose explicitly. Returns what the popup should say. */
 export async function takeLink({ url, filename, referer }) {
-  if (!/^https?:/i.test(url)) { return { ok: false, message: "Only http and https links are supported." }; }
+  // http(s), a magnet link and a torrent file all go to the desktop; eD2k is not a URL and
+  // is left to the user's own eD2k client.
+  if (!/^(https?|magnet):/i.test(url) && !/\.torrent($|\?)/i.test(url)) {
+    return { ok: false, message: "Only http, https, magnet and torrent links are supported." };
+  }
   if (!desktopBridge.ready) {
     await offerDesktop(url);
     return { ok: false, message: "OmaLLDownloader is not running. The browser will download it instead." };

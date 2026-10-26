@@ -84,10 +84,11 @@ Resume and Remove per task, and shows a running total at the top. It reads the s
 
 ## Protocols
 
-HTTP/HTTPS (chunked, resumable, digest-checked), HLS and FTP are implemented and tested;
-DASH is partial; magnet/BitTorrent, eD2k and site extractors are not, and are refused with a
-reason rather than failing silently. [`docs/PROTOCOLS.md`](docs/PROTOCOLS.md) says what is
-tested against what, and why the gap is where it is.
+HTTP/HTTPS (chunked, resumable, digest-checked), HLS, FTP and BitTorrent (via
+[librqbit](https://crates.io/crates/librqbit)) are implemented; DASH is partial; eD2k is
+delegated to a local `amule`; site extractors are not implemented.
+[`docs/PROTOCOLS.md`](docs/PROTOCOLS.md) says what is tested against what and why the gap is
+where it is.
 
 ## Platforms
 
