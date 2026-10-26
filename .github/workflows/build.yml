@@ -58,6 +58,16 @@ jobs:
           xcodebuild -downloadComponent MetalToolchain || true
           xcrun -sdk macosx metal --version || echo "metal toolchain still missing"
 
+      - name: The shipped binary must not carry GPUI's test support
+        # Cargo unifies features across one build, so a workspace member that depends on
+        # `gpui/test-support` would silently turn the release binary into a test binary.
+        shell: bash
+        run: |
+          if cargo tree -p omad-app -e features --release | grep -q 'gpui feature "test-support"'; then
+            echo "::error::gpui/test-support reached omad-app; the release binary would be a test build"
+            exit 1
+          fi
+
       - name: Build
         run: cargo build --release --workspace
 

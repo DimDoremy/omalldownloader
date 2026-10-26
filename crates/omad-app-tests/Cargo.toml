@@ -7,7 +7,11 @@ version.workspace = true
 publish = false
 description = "The window's tests. A crate of their own so that `odk`'s test-support feature never reaches the shipped binary (it changes how GPUI starts)"
 
-[dependencies]
+# These are *dev*-dependencies on purpose: `cargo build --workspace` must not build this
+# crate with `test-support`, because cargo unifies features across one build and GPUI's
+# test-support changes how the runtime starts — the shipped binary would be a test binary.
+# With them here, only `cargo test` turns the feature on.
+[dev-dependencies]
 omad-app.workspace = true
 omad-core.workspace = true
 omad-engine.workspace = true
