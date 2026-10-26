@@ -250,6 +250,37 @@ impl Engine {
         mut stop: watch::Receiver<bool>,
         mut cancel: Option<tokio::sync::broadcast::Receiver<()>>,
     ) -> Result<Outcome, EngineError> {
+        // A playlist or an FTP URL is not the chunked HTTP path; hand it to its pack.
+        if crate::packs::kind_of(&url) != crate::packs::Kind::Http {
+            let context = crate::packs::PackContext {
+                id,
+                target: &target,
+                sink: sink.as_ref(),
+                stop: stop.clone(),
+                client: &self.client,
+                policy: &self.config.policy,
+            };
+            return match crate::packs::run_pack(&context, &url).await {
+                Ok(bytes) => {
+                    sink.on_finished(id, Outcome::Completed, bytes, Some(bytes));
+                    Ok(Outcome::Completed)
+                }
+                Err(crate::packs::PackError::Paused) => {
+                    sink.on_finished(id, Outcome::Paused, 0, None);
+                    Ok(Outcome::Paused)
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    sink.on_failed(
+                        id,
+                        &message,
+                        !matches!(error, crate::packs::PackError::Unsupported(_)),
+                    );
+                    Err(crate::packs::to_engine(error))
+                }
+            };
+        }
+
         let probe_source = crate::http::HttpProbe::with_client(self.client.clone());
         let outcome = match probe_source.probe(&url, &self.config.policy).await {
             Ok(outcome) => outcome,

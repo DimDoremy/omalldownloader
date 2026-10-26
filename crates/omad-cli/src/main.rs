@@ -406,10 +406,16 @@ fn outcome_label(outcome: Outcome) -> &'static str {
 
 fn parse_url(text: &str) -> anyhow::Result<url::Url> {
     let url = url::Url::parse(text).map_err(|e| anyhow::anyhow!("{text} is not a URL: {e}"))?;
-    if !matches!(url.scheme(), "http" | "https") {
-        anyhow::bail!("only http and https are supported, not {}", url.scheme());
+    // http(s) is the engine's own path, and a playlist on top of it; ftp and ftps go to the
+    // FTP pack. Magnet and eD2k are refused with a reason rather than failing later.
+    match url.scheme() {
+        "http" | "https" | "ftp" | "ftps" => Ok(url),
+        "magnet" | "ed2k" => anyhow::bail!(
+            "{} links are not supported yet; this build handles http, https, ftp and HLS/DASH playlists",
+            url.scheme()
+        ),
+        other => anyhow::bail!("{other} is not a scheme this downloader handles"),
     }
-    Ok(url)
 }
 
 fn parse_id(text: &str) -> anyhow::Result<TaskId> {

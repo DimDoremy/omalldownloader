@@ -194,6 +194,36 @@ async fn a_first_contact_extension_is_trusted_and_given_a_secret() {
 }
 
 #[tokio::test]
+async fn an_extension_that_lost_its_secret_recovers_without_a_code() {
+    // A browser profile whose storage was cleared has no secret, but the desktop still has
+    // the old one. Sending no proof must hand out a new secret rather than leaving the
+    // extension permanently offline.
+    let bridge = start(true, Some("the-old-secret")).await;
+    let mut ws = connect(bridge.addr(), "chrome-extension://testextensionid")
+        .await
+        .unwrap();
+    let _challenge: ServerMessage = recv(&mut ws).await;
+    ws.send(Message::Text(
+        serde_json::to_string(&ClientMessage::Hello {
+            major: omad_rpc::PROTOCOL_MAJOR,
+            minor: omad_rpc::PROTOCOL_MINOR,
+            extension_version: "1.0.0".into(),
+            proof: String::new(),
+        })
+        .unwrap()
+        .into(),
+    ))
+    .await
+    .unwrap();
+    match recv(&mut ws).await {
+        ServerMessage::Paired { secret } => assert_eq!(secret.len(), 64),
+        other => panic!("a cleared profile must be re-trusted, got {other:?}"),
+    }
+    assert!(matches!(recv(&mut ws).await, ServerMessage::Welcome { .. }));
+    bridge.shutdown();
+}
+
+#[tokio::test]
 async fn a_page_origin_cannot_use_first_contact() {
     // The handshake refuses a page before any of this, so the automatic trust can only
     // ever apply to an extension origin.

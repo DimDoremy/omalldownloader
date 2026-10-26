@@ -93,6 +93,14 @@ export async function onDeterminingFilename(item, suggest) {
   const shouldTake = settings.takeAll && !tooSmall && !isSkipped(item.url, filename);
   if (!shouldTake) { suggest(); return; }
 
+  // The desktop is not there: let the browser do what it would have done, and say so.
+  // Cancelling first and failing afterwards would leave the user with nothing.
+  if (!desktopBridge.ready) {
+    suggest();
+    await offerDesktop(item.url);
+    return;
+  }
+
   // Cancel the browser's copy and ask the desktop for it.
   try { await chrome.downloads.cancel(item.id); } catch { /* already gone */ }
 
@@ -103,19 +111,66 @@ export async function onDeterminingFilename(item, suggest) {
   });
 
   if (result.queued) {
-    notify("Queued in OmaLLDownloader", "The desktop app is not running; the link is waiting.");
+    // The connection dropped between the check and the send.
+    await offerDesktop(item.url);
   }
   // The browser still needs an answer; the file it would have saved is cancelled.
   suggest({ filename: filename || "omalldownloader-download" });
 }
 
+/**
+ * Says the desktop is not reachable and offers to open it.
+ *
+ * The download has already gone back to the browser, so nothing is lost; this explains
+ * why the file is in the browser's own list.
+ */
+async function offerDesktop(url) {
+  const id = `offline-${Date.now()}`;
+  chrome.notifications?.create(id, {
+    type: "basic",
+    iconUrl: "icon128.png",
+    title: "OmaLLDownloader is not running",
+    message: "The browser is downloading this file itself. Open the app to take it next time.",
+    buttons: [{ title: "Open OmaLLDownloader" }, { title: "Dismiss" }],
+    priority: 1,
+  });
+  if (!offerDesktop.listening) {
+    offerDesktop.listening = true;
+    chrome.notifications?.onButtonClicked.addListener((notificationId, index) => {
+      if (!notificationId.startsWith("offline-")) { return; }
+      if (index === 0) { openDesktop(); }
+      chrome.notifications.clear(notificationId);
+    });
+    chrome.notifications?.onClicked.addListener((notificationId) => {
+      if (notificationId.startsWith("offline-")) { openDesktop(); }
+    });
+  }
+  offerDesktop.lastUrl = url;
+}
+
+/**
+ * Asks the desktop to open.
+ *
+ * An extension cannot start a process, so this navigates to the URL scheme the desktop
+ * entry registers; the desktop's own handler starts the app.
+ */
+export function openDesktop() {
+  chrome.tabs.create({ url: "omalldownloader://open" }).catch(() => {
+    chrome.tabs.create({ url: "chrome://extensions" }).catch(() => {});
+  });
+}
+
 /** Takes one link the user chose explicitly. Returns what the popup should say. */
 export async function takeLink({ url, filename, referer }) {
   if (!/^https?:/i.test(url)) { return { ok: false, message: "Only http and https links are supported." }; }
+  if (!desktopBridge.ready) {
+    await offerDesktop(url);
+    return { ok: false, message: "OmaLLDownloader is not running. The browser will download it instead." };
+  }
   const result = await desktopBridge.addTask({ url, filename, referer });
   return {
     ok: true,
-    message: result.queued ? "Queued: the desktop app is not running yet." : "Sent to OmaLLDownloader.",
+    message: result.queued ? "Queued: the connection dropped, it will be sent when it returns." : "Sent to OmaLLDownloader.",
   };
 }
 

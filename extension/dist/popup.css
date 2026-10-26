@@ -196,6 +196,29 @@ button.link {
 
 .switch { display: flex; align-items: center; gap: var(--space-2); color: var(--text); }
 
+.summary {
+  margin: 0 0 var(--space-2);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.task-actions {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.task-actions .link {
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 footer {
   display: flex;
   align-items: center;

@@ -10,7 +10,9 @@ Terminal=false
 Categories=Network;Utility;
 Keywords=download;downloader;http;wget;curl;
 StartupWMClass=omalldownloader
-MimeType=x-scheme-handler/omalldownloader;
+# What this build actually handles. magnet, ed2k and torrent files are deliberately absent:
+# a handler that cannot download them is worse than no handler.
+MimeType=x-scheme-handler/omalldownloader;x-scheme-handler/ftp;x-scheme-handler/ftps;application/vnd.apple.mpegurl;application/dash+xml;
 Actions=NewDownload;
 
 [Desktop Action NewDownload]

@@ -21,6 +21,7 @@
 
 pub mod engine;
 pub mod http;
+pub mod packs;
 
 pub use engine::{Engine, EngineConfig, Outcome, Progress, StoreSink};
 pub use http::{HttpProbe, Probe, ProbeOutcome, ProbeSource};

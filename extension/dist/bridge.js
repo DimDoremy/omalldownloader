@@ -38,6 +38,8 @@ export class DesktopBridge extends EventTarget {
     this.waiters = new Map();
     this.queue = [];
     this.disposed = false;
+    /** Why the last connection attempt failed, for the popup to show. */
+    this.lastError = "";
   }
 
   async load() {
@@ -100,6 +102,14 @@ export class DesktopBridge extends EventTarget {
     }
     this.socket = socket;
 
+    const openTimeout = setTimeout(() => {
+      if (!this.ready && this.socket === socket) {
+        this.lastError = `no answer from ${this.address}`;
+        socket.close();
+      }
+    }, 4000);
+    socket.addEventListener("open", () => clearTimeout(openTimeout));
+
     socket.addEventListener("message", (event) => {
       let message;
       try { message = JSON.parse(String(event.data)); } catch { return; }
@@ -113,6 +123,7 @@ export class DesktopBridge extends EventTarget {
     });
     socket.addEventListener("error", () => {
       // `close` follows and is where the retry lives.
+      this.lastError = `cannot reach ${this.address}`;
     });
   }
 
@@ -124,6 +135,12 @@ export class DesktopBridge extends EventTarget {
 
   scheduleReconnect() {
     if (this.disposed || !this.isPaired) { return; }
+    // A stored address may be stale (an older build used a random port). After a couple
+    // of misses, try the fixed one too, so an upgrade needs no manual repair.
+    if (this.attempt >= 2 && this.address !== DEFAULT_ADDRESS) {
+      this.address = DEFAULT_ADDRESS;
+      this.attempt = 0;
+    }
     const delay = BACKOFF[Math.min(this.attempt, BACKOFF.length - 1)];
     this.attempt += 1;
     setTimeout(() => this.connect(), delay);
@@ -131,7 +148,13 @@ export class DesktopBridge extends EventTarget {
 
   emitState() {
     this.dispatchEvent(new CustomEvent("state", {
-      detail: { connected: this.ready, paired: this.isPaired, address: this.address },
+      detail: {
+        connected: this.ready,
+        paired: this.isPaired,
+        address: this.address,
+        // The popup shows this verbatim when it cannot reach the desktop.
+        reason: this.ready ? "" : this.lastError || "the desktop app is not answering",
+      },
     }));
   }
 

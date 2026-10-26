@@ -1,10 +1,8 @@
 /**
- * The popup. It reads state from the worker over a port, shows the pairing form when the
- * profile has no secret, and never touches a WebSocket itself.
+ * The popup: the download list, and what to do when the desktop is not there.
  *
- * The code the user types is turned into a proof here and nowhere else: it signs the
- * desktop's challenge and is never stored, so a code that was read off the wrong screen
- * cannot outlive the pairing.
+ * It owns no socket. Everything goes through the service worker over a port, so closing the
+ * popup never cancels a request and the worker keeps the connection.
  */
 
 import { MSG } from "./protocol.js";
@@ -13,10 +11,13 @@ import { DEFAULT_ADDRESS } from "./bridge.js";
 const el = {
   status: document.getElementById("status"),
   offline: document.getElementById("offline"),
+  reason: document.getElementById("reason"),
   address: document.getElementById("address"),
   reconnect: document.getElementById("reconnect"),
-  pairError: document.getElementById("pair-error"),
+  openApp: document.getElementById("open-app"),
+  listError: document.getElementById("pair-error"),
   connected: document.getElementById("connected"),
+  summary: document.getElementById("summary"),
   tasks: document.getElementById("tasks"),
   noTasks: document.getElementById("no-tasks"),
   takeAll: document.getElementById("take-all"),
@@ -27,26 +28,23 @@ const el = {
 };
 
 const port = chrome.runtime.connect({ name: "omalldownloader" });
-let paired = false;
-let address = "";
+let connected = false;
+let tasks = [];
 
 port.onMessage.addListener((message) => {
   switch (message.type) {
     case "state":
-      paired = message.paired;
-      address = message.address ?? "";
-      paintStatus(message.connected, message.paired);
+      connected = Boolean(message.connected);
+      paintStatus(connected, message.reason);
       paintSettings(message.settings);
-      paintTasks(message.tasks ?? []);
+      if (Array.isArray(message.tasks)) { paintTasks(message.tasks); }
+      el.address.value = message.address || DEFAULT_ADDRESS;
       break;
     case "tasks":
       paintTasks(message.tasks ?? []);
       break;
     case "settings":
       paintSettings(message.settings);
-      break;
-    case "page-links":
-      if (message.links?.length === 0) { showResult("No links on this page."); }
       break;
     case "result":
       showResult(message.message);
@@ -61,14 +59,12 @@ port.onMessage.addListener((message) => {
 
 port.postMessage({ type: "state" });
 
-function paintStatus(connected, isPaired) {
-  el.status.dataset.state = connected ? "connected" : "offline";
-  // There is nothing to pair: the extension is either talking to the desktop or not.
-  el.status.textContent = connected ? "Desktop connected" : "Desktop offline";
-  el.offline.hidden = connected;
-  el.connected.hidden = !isPaired;
-  el.reset.hidden = !isPaired;
-  el.address.value = address || DEFAULT_ADDRESS;
+function paintStatus(isConnected, reason) {
+  el.status.dataset.state = isConnected ? "connected" : "offline";
+  el.status.textContent = isConnected ? "Connected" : "Offline";
+  el.offline.hidden = isConnected;
+  el.connected.hidden = !isConnected;
+  el.reason.textContent = isConnected ? "" : (reason || "The desktop app is not answering.");
 }
 
 function paintSettings(settings) {
@@ -78,54 +74,88 @@ function paintSettings(settings) {
   el.skip.value = settings.skipExtensions ?? "";
 }
 
-function paintTasks(tasks) {
+function paintTasks(next) {
+  tasks = next;
   el.tasks.replaceChildren();
   el.noTasks.hidden = tasks.length > 0;
+
+  const running = tasks.filter((task) => task.status === "running");
+  const speed = running.reduce((sum, task) => sum + (Number(task.speed) || 0), 0);
+  el.summary.textContent = running.length > 0
+    ? `${running.length} downloading · ${bytes(speed)}/s`
+    : `${tasks.length} task${tasks.length === 1 ? "" : "s"}`;
+
   for (const task of tasks) {
-    const item = document.createElement("li");
-    item.className = "task";
-
-    const head = document.createElement("div");
-    head.className = "task-head";
-    const name = document.createElement("span");
-    name.className = "task-name";
-    name.textContent = task.filename || task.url;
-    name.title = task.url;
-    const state = document.createElement("span");
-    state.className = "task-state";
-    state.dataset.state = task.status;
-    // The state is a word, not just a colour.
-    state.textContent = label(task.status);
-    head.append(name, state);
-
-    const bar = document.createElement("div");
-    bar.className = "bar";
-    const fill = document.createElement("span");
-    const fraction = task.total_bytes > 0
-      ? Math.min(1, task.received_bytes / task.total_bytes)
-      : 0;
-    fill.style.width = `${(fraction * 100).toFixed(1)}%`;
-    bar.append(fill);
-
-    const meta = document.createElement("div");
-    meta.className = "task-meta";
-    const left = document.createElement("span");
-    left.textContent = task.total_bytes > 0
-      ? `${bytes(task.received_bytes)} / ${bytes(task.total_bytes)}`
-      : bytes(task.received_bytes);
-    const right = document.createElement("span");
-    right.textContent = task.status === "running" && task.speed > 0 ? `${bytes(task.speed)}/s` : "";
-    meta.append(left, right);
-
-    item.append(head, bar, meta);
-    if (task.error) {
-      const error = document.createElement("p");
-      error.className = "error";
-      error.textContent = task.error;
-      item.append(error);
-    }
-    el.tasks.append(item);
+    el.tasks.append(taskRow(task));
   }
+}
+
+function taskRow(task) {
+  const item = document.createElement("li");
+  item.className = "task";
+
+  const head = document.createElement("div");
+  head.className = "task-head";
+  const name = document.createElement("span");
+  name.className = "task-name";
+  name.textContent = task.filename || task.url;
+  name.title = task.url;
+  const state = document.createElement("span");
+  state.className = "task-state";
+  state.dataset.state = task.status;
+  state.textContent = label(task.status);
+  head.append(name, state);
+
+  const bar = document.createElement("div");
+  bar.className = "bar";
+  const fill = document.createElement("span");
+  const fraction = task.total_bytes > 0
+    ? Math.min(1, task.received_bytes / task.total_bytes)
+    : 0;
+  fill.style.width = `${(fraction * 100).toFixed(1)}%`;
+  bar.append(fill);
+
+  const meta = document.createElement("div");
+  meta.className = "task-meta";
+  const left = document.createElement("span");
+  left.textContent = task.total_bytes > 0
+    ? `${bytes(task.received_bytes)} / ${bytes(task.total_bytes)}`
+    : bytes(task.received_bytes);
+  const right = document.createElement("span");
+  right.textContent = task.status === "running" && task.speed > 0 ? `${bytes(task.speed)}/s` : "";
+  meta.append(left, right);
+
+  const actions = document.createElement("div");
+  actions.className = "task-actions";
+  if (task.status === "running" || task.status === "queued") {
+    actions.append(action("Pause", () => command({ type: MSG.PAUSE, id: task.id })));
+  }
+  if (task.status === "paused" || task.status === "failed") {
+    actions.append(action("Resume", () => command({ type: MSG.RESUME, id: task.id })));
+  }
+  actions.append(action("Remove", () => command({ type: MSG.REMOVE, id: task.id })));
+
+  item.append(head, bar, meta, actions);
+  if (task.error) {
+    const error = document.createElement("p");
+    error.className = "error";
+    error.textContent = task.error;
+    item.append(error);
+  }
+  return item;
+}
+
+function action(text, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "link";
+  button.textContent = text;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function command(message) {
+  port.postMessage({ type: "control", message });
 }
 
 function label(status) {
@@ -150,8 +180,8 @@ function bytes(value) {
 }
 
 function showResult(text) {
-  el.pairError.hidden = !text;
-  el.pairError.textContent = text ?? "";
+  el.listError.hidden = !text;
+  el.listError.textContent = text ?? "";
 }
 
 async function sendSettings() {
@@ -175,28 +205,21 @@ el.sendPage.addEventListener("click", async () => {
   port.postMessage({ type: "take-link", task: { url: tab.url, referer: tab.url } });
 });
 
-el.reset.addEventListener("click", async () => {
-  await chrome.storage.local.set({ bridgeAddress: DEFAULT_ADDRESS, bridgeSecret: "" });
-  portraitReset();
+el.openApp.addEventListener("click", () => {
+  chrome.tabs.create({ url: "omalldownloader://open" }).catch(() => {});
 });
 
-/** Forget the secret and start over; the desktop trusts a fresh extension again. */
-function portraitReset() {
-  paired = false;
-  paintStatus(false, false);
-  showResult("Forgotten. Reopen the popup to connect again.");
-}
-
-
-/**
- * Reconnect, and remember the address if the user changed the port.
- * There is no code: the desktop trusts a browser extension on first contact and hands it
- * a secret, which the worker stores for every later connection.
- */
 el.reconnect.addEventListener("click", async () => {
   const address = el.address.value.trim() || DEFAULT_ADDRESS;
   await chrome.storage.local.set({ bridgeAddress: address });
   showResult("Connecting…");
+  chrome.runtime.sendMessage({ type: "reconnect" }).catch(() => {});
+});
+
+el.reset.addEventListener("click", async () => {
+  await chrome.storage.local.set({ bridgeAddress: DEFAULT_ADDRESS, bridgeSecret: "" });
+  connected = false;
+  paintStatus(false, "Forgotten this browser; reconnecting…");
   chrome.runtime.sendMessage({ type: "reconnect" }).catch(() => {});
 });
 

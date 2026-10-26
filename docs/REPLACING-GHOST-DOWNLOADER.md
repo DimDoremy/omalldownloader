@@ -62,9 +62,16 @@ Everything user-level, after a backup:
    for `ws://127.0.0.1:14370`, the app trusts the first browser extension that connects and
    hands it a secret, and every later connection proves that secret. Nothing to type.
 
-## What is not covered
+## What omad took over
 
-Ghost Downloader handled magnet/BT, eD2k, FTP, M3U8, MPEG-DASH and site extractors. omad
-does HTTP/HTTPS only, so those eight MIME associations were **dropped rather than pointed at
-omad** — a missing handler is honest, a handler that silently fails is not. Those protocols
-are the obvious next feature.
+| Ghost Downloader | Here |
+|---|---|
+| HTTP/HTTPS | done, chunked and resumable |
+| FTP | done, with `REST` resume; `ftp://` and `ftps://` registered |
+| M3U8 (HLS) | done; `application/vnd.apple.mpegurl` registered |
+| MPEG-DASH | partial — first `<BaseURL>` only; `application/dash+xml` registered |
+| magnet / BT, eD2k | **not implemented**; those associations stay empty on purpose |
+| YouTube/Bilibili and site extractors | not implemented |
+
+`docs/PROTOCOLS.md` explains why BitTorrent and eD2k are a larger job than the others, and
+what would have to change to add them.

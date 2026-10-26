@@ -51,7 +51,10 @@ async function start() {
   });
   desktopBridge.addEventListener("tasks", (event) => {
     const message = event.detail;
-    if (message.type === MSG.TASKS) { paintBadge(message.tasks ?? []); }
+    if (message.type === MSG.TASKS) {
+      paintBadge(message.tasks ?? []);
+      broadcast({ type: "tasks", tasks: taskState.tasks });
+    }
     if (message.type === MSG.TASK && message.task) {
       const tasks = taskState.tasks.filter((task) => task.id !== message.task.id);
       tasks.push(message.task);
@@ -67,6 +70,9 @@ async function start() {
 }
 
 start();
+
+// Read-only handle for the end-to-end test (`tests/e2e/connect.test.mjs`).
+globalThis.desktopBridgeForTest = desktopBridge;
 
 // A hook the end-to-end test uses to pair without a popup: it writes the same two storage
 // keys the popup writes and asks the bridge to connect now. It is inert otherwise.
@@ -100,8 +106,18 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
 // The popup and the options page talk to the worker over one long-lived port, so a
 // popup that closes does not cancel what it asked for.
+// One place that knows about open popups, so a task change reaches every one of them.
+const popups = new Set();
+function broadcast(message) {
+  for (const popup of popups) {
+    try { popup.postMessage(message); } catch { popups.delete(popup); }
+  }
+}
+
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== "omalldownloader") { return; }
+  if (port.name !== "omalldownloader" && port.name !== "ghost-flow") { return; }
+  popups.add(port);
+  port.onDisconnect.addListener(() => popups.delete(port));
 
   port.onMessage.addListener(async (request) => {
     switch (request?.type) {
@@ -135,6 +151,10 @@ chrome.runtime.onConnect.addListener((port) => {
         port.postMessage({ type: "page-links", links });
         break;
       }
+      case "control":
+        // A button in the popup: forward the command the user asked for.
+        desktopBridge.send(request.message);
+        break;
       case "reconnect":
         desktopBridge.close();
         desktopBridge.connect();

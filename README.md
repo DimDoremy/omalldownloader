@@ -82,6 +82,13 @@ The popup lists every task with its status, progress, size and live speed, offer
 Resume and Remove per task, and shows a running total at the top. It reads the same
 `omad tasks --json` the window and the CLI read.
 
+## Protocols
+
+HTTP/HTTPS (chunked, resumable, digest-checked), HLS and FTP are implemented and tested;
+DASH is partial; magnet/BitTorrent, eD2k and site extractors are not, and are refused with a
+reason rather than failing silently. [`docs/PROTOCOLS.md`](docs/PROTOCOLS.md) says what is
+tested against what, and why the gap is where it is.
+
 ## Platforms
 
 Linux and macOS build and run; Windows builds in CI and has not been run. The details, the

@@ -382,22 +382,28 @@ async fn serve(
                     // and handed a secret, which is what makes the extension "just connect".
                     // The Origin was checked at the handshake, so a web page cannot be here;
                     // every later connection has to prove the secret.
-                    let accepted = match known {
-                        Some(secret) => {
-                            constant_time_eq(hmac_hex(&secret, &nonce).as_bytes(), proof.as_bytes())
+                    // No proof at all means "I have no secret": a fresh install, or a
+                    // browser profile whose storage was cleared. Either way it gets a new
+                    // one, which is what lets the extension recover on its own instead of
+                    // sitting offline against a secret the desktop remembers and it does not.
+                    let accepted = if proof.is_empty() && shared.config.trust_first_origin {
+                        let secret = random_token(32);
+                        shared
+                            .secrets
+                            .lock()
+                            .await
+                            .insert(origin.clone(), secret.clone());
+                        shared.host.remember_origin(&origin, &secret);
+                        send(&mut ws, ServerMessage::Paired { secret }).await?;
+                        true
+                    } else {
+                        match known {
+                            Some(secret) => constant_time_eq(
+                                hmac_hex(&secret, &nonce).as_bytes(),
+                                proof.as_bytes(),
+                            ),
+                            None => false,
                         }
-                        None if shared.config.trust_first_origin && proof.is_empty() => {
-                            let secret = random_token(32);
-                            shared
-                                .secrets
-                                .lock()
-                                .await
-                                .insert(origin.clone(), secret.clone());
-                            shared.host.remember_origin(&origin, &secret);
-                            send(&mut ws, ServerMessage::Paired { secret }).await?;
-                            true
-                        }
-                        None => false,
                     };
                     if accepted {
                         authenticated = true;
