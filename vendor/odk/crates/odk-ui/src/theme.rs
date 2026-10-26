@@ -550,12 +550,26 @@ struct Stamp(Option<(std::time::SystemTime, u64, u64)>);
 
 impl Stamp {
     fn of(path: &Path) -> Self {
-        use std::os::unix::fs::MetadataExt;
         Self(std::fs::metadata(path).ok().map(|m| {
+            // The third part is the file's identity, which a rename over it changes: the
+            // inode on Unix, and on Windows the creation time, which a replacement gets
+            // anew. (Local patch to ODK: this used the inode unconditionally.)
+            #[cfg(unix)]
+            let identity = {
+                use std::os::unix::fs::MetadataExt;
+                m.ino()
+            };
+            #[cfg(not(unix))]
+            let identity = m
+                .created()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
             (
                 m.modified().unwrap_or(std::time::UNIX_EPOCH),
                 m.len(),
-                m.ino(),
+                identity,
             )
         }))
     }

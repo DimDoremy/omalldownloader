@@ -169,12 +169,12 @@ mod tests {
         ));
     }
 
+    #[cfg(unix)]
     #[test]
     fn refuses_a_symlink_pointing_out_of_the_root() {
         let dir = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
         let link = dir.path().join("escape");
-        #[cfg(unix)]
         std::os::unix::fs::symlink(outside.path(), &link).unwrap();
 
         let root = DownloadRoot::new(dir.path()).unwrap();
@@ -182,12 +182,12 @@ mod tests {
         assert!(matches!(err, PathError::Outside { .. }), "got {err:?}");
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_symlinked_root_is_resolved_once() {
         let real = tempfile::tempdir().unwrap();
         let alias_parent = tempfile::tempdir().unwrap();
         let alias = alias_parent.path().join("alias");
-        #[cfg(unix)]
         std::os::unix::fs::symlink(real.path(), &alias).unwrap();
 
         let root = DownloadRoot::new(&alias).unwrap();
