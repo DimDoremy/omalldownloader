@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Name=OmaLLDownloader
+GenericName=Download Manager
+Comment=Chunked HTTP downloads with resume, a command line, and a browser extension
+Exec=omalldownloader %U
+TryExec=omalldownloader
+Icon=omalldownloader
+Terminal=false
+Categories=Network;Utility;
+Keywords=download;downloader;http;wget;curl;
+StartupWMClass=omalldownloader
+MimeType=x-scheme-handler/omalldownloader;
+Actions=NewDownload;
+
+[Desktop Action NewDownload]
+Name=New download
+Exec=omalldownloader

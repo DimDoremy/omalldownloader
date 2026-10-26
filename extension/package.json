@@ -1,0 +1,11 @@
+{
+  "name": "omalldownloader-extension",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "OmaLLDownloader's Chrome extension: hand downloads to the desktop app",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/"
+  }
+}

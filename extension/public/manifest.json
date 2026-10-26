@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "OmaLLDownloader",
+  "version": "0.1.0",
+  "description": "Send downloads to OmaLLDownloader instead of the browser.",
+  "minimum_chrome_version": "116",
+  "permissions": ["downloads", "storage", "contextMenus", "notifications", "scripting", "activeTab"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": {
+    "default_title": "OmaLLDownloader",
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icon16.png", "32": "icon32.png", "48": "icon48.png", "128": "icon128.png" }
+  },
+  "icons": { "16": "icon16.png", "32": "icon32.png", "48": "icon48.png", "128": "icon128.png" },
+  "content_security_policy": {
+    "extension_pages": "default-src 'self'; script-src 'self'; object-src 'self'; connect-src ws://127.0.0.1:* ws://localhost:*"
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "id": "dimdoremy.omalldownloader",
+  "name": "OmaLLDownloader",
+  "version": "1.0.0",
+  "author": "DimDoremy",
+  "license": "MIT",
+  "description": "Download activity in the Omarchy bar: how many tasks are running, the total speed, and a popup with each task's progress. Reads `omad tasks --json`, so it shows the same list the app and the CLI see.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "OmaLLDownloaderWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "OmaLLDownloader",
+    "description": "Download count and speed, with a popup of every task.",
+    "category": "Network",
+    "aliases": ["download", "downloads", "downloader", "omad", "omalldownloader", "transfer"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "omadPath": "omad",
+      "refreshSeconds": 2,
+      "showWhenIdle": true,
+      "label": "speed"
+    },
+    "schema": [
+      {
+        "key": "omadPath",
+        "type": "string",
+        "label": "omad command",
+        "description": "Path to the omad executable, if it is not on the shell's PATH.",
+        "defaultValue": "omad"
+      },
+      {
+        "key": "refreshSeconds",
+        "type": "integer",
+        "label": "Refresh every (seconds)",
+        "min": 1,
+        "max": 60,
+        "step": 1,
+        "defaultValue": 2
+      },
+      {
+        "key": "showWhenIdle",
+        "type": "boolean",
+        "label": "Show when idle",
+        "description": "Keep the glyph visible with no tasks instead of hiding it.",
+        "defaultValue": false
+      },
+      {
+        "key": "label",
+        "type": "enum",
+        "label": "Bar label",
+        "options": ["speed", "count", "none"],
+        "defaultValue": "speed"
+      }
+    ]
+  }
+}

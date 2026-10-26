@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>OmaLLDownloader</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <h1>OmaLLDownloader</h1>
+    <span id="status" class="status" data-state="unknown">…</span>
+  </header>
+
+  <section id="pairing" hidden>
+    <p class="hint">
+      Open OmaLLDownloader, go to <strong>Browser extension</strong>, and type the address and
+      code it shows. The code is good for one pairing.
+    </p>
+    <label for="address">Address</label>
+    <input id="address" type="text" placeholder="ws://127.0.0.1:54321" spellcheck="false" />
+    <label for="code">Code</label>
+    <input id="code" type="text" inputmode="numeric" placeholder="123456" autocomplete="off" />
+    <button id="pair" class="primary">Pair</button>
+    <p id="pair-error" class="error" hidden></p>
+  </section>
+
+  <section id="connected" hidden>
+    <ul id="tasks" class="tasks"></ul>
+    <p id="no-tasks" class="hint" hidden>No downloads yet.</p>
+  </section>
+
+  <section>
+    <label class="switch">
+      <input id="take-all" type="checkbox" />
+      <span>Take downloads from the browser</span>
+    </label>
+    <label for="min-size">Only files larger than (KB)</label>
+    <input id="min-size" type="number" min="0" step="128" />
+    <label for="skip">Leave these extensions to the browser</label>
+    <input id="skip" type="text" placeholder="html,txt" spellcheck="false" />
+  </section>
+
+  <footer>
+    <button id="send-page" class="secondary">Send this page</button>
+    <button id="unpair" class="link" hidden>Unpair</button>
+  </footer>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
