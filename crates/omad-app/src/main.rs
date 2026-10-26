@@ -494,7 +494,7 @@ impl EngineHost for Service {
 
     fn pause_all(&self) {
         // One signal for every task that is running in this process.
-        for (_, sender) in self.stops.lock().unwrap().iter() {
+        for sender in self.stops.lock().unwrap().values() {
             let _ = sender.send(true);
         }
         for row in self.board.rows() {

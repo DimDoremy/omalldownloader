@@ -346,7 +346,16 @@ fn download(
 
     let outcome = runtime.block_on(async {
         engine
-            .run_task(record.id, url, path, plan, record.connections, sink, stop_rx, None)
+            .run_task(
+                record.id,
+                url,
+                path,
+                plan,
+                record.connections,
+                sink,
+                stop_rx,
+                None,
+            )
             .await
     });
     watcher.abort();

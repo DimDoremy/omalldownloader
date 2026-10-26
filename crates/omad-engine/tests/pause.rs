@@ -33,7 +33,9 @@ fn slow_server(body: Vec<u8>, chunk: usize, gap: Duration) -> u16 {
                 let mut buffer = [0u8; 8192];
                 let mut read = 0;
                 loop {
-                    let Ok(n) = stream.read(&mut buffer[read..]) else { return };
+                    let Ok(n) = stream.read(&mut buffer[read..]) else {
+                        return;
+                    };
                     if n == 0 {
                         return;
                     }
@@ -71,7 +73,11 @@ fn slow_server(body: Vec<u8>, chunk: usize, gap: Duration) -> u16 {
                      Content-Disposition: attachment; filename=\"big.bin\"\r\n\
                      Content-Range: bytes {from}-{to}/{}\r\n\
                      Content-Length: {}\r\nConnection: close\r\n\r\n",
-                    if status == 206 { "Partial Content" } else { "OK" },
+                    if status == 206 {
+                        "Partial Content"
+                    } else {
+                        "OK"
+                    },
                     body.len(),
                     slice.len()
                 );
@@ -137,10 +143,8 @@ async fn pausing_stops_promptly_and_keeps_what_was_written() {
     let url = url::Url::parse(&format!("http://127.0.0.1:{port}/big.bin")).unwrap();
 
     // Ask for the pause once a third of the file is on disk.
-    let stop_when = Arc::new(AtomicU64::new(0));
     let stopper = {
         let watcher = watcher.clone();
-        let stop_when = stop_when.clone();
         let stop_tx = stop_tx.clone();
         tokio::spawn(async move {
             let deadline = Instant::now() + Duration::from_secs(20);
@@ -158,7 +162,16 @@ async fn pausing_stops_promptly_and_keeps_what_was_written() {
 
     let started = Instant::now();
     let outcome = engine
-        .run_task(TaskId(1), url.clone(), target.clone(), None, 2, watcher.clone(), stop_rx, None)
+        .run_task(
+            TaskId(1),
+            url.clone(),
+            target.clone(),
+            None,
+            2,
+            watcher.clone(),
+            stop_rx,
+            None,
+        )
         .await
         .expect("a pause is not an error");
     stopper.abort();
@@ -182,9 +195,18 @@ async fn pausing_stops_promptly_and_keeps_what_was_written() {
     // The bytes that were written must be the bytes the server sent, at the offsets the
     // plan says they went to. Chunks are written in parallel, so this is checked per chunk
     // rather than over one prefix of the file.
-    let plan = watcher.plan.lock().unwrap().clone().expect("a plan was reported");
+    let plan = watcher
+        .plan
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("a plan was reported");
     let on_disk = std::fs::read(&target).unwrap();
-    assert_eq!(on_disk.len(), SIZE, "a paused file is preallocated to its full size");
+    assert_eq!(
+        on_disk.len(),
+        SIZE,
+        "a paused file is preallocated to its full size"
+    );
     // Every byte that was written is correct, at its own offset. The rest of the file is
     // still the zeroes the preallocation left, which a resume overwrites.
     let mut nonzero = 0usize;
