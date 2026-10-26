@@ -27,7 +27,8 @@ pub mod component;
 #[cfg(unix)]
 mod compositor;
 #[cfg(not(unix))]
-mod compositor_stub as compositor;
+#[path = "compositor_stub.rs"]
+mod compositor;
 mod discovery;
 mod error;
 pub mod foundation;
