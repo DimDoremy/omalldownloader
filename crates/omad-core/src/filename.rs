@@ -154,6 +154,30 @@ pub fn from_content_disposition(header: &str) -> Option<String> {
 /// A file name for a URL whose server said nothing: the last path segment, or the
 /// host when the path ends at the root.
 pub fn from_url(url: &url::Url) -> String {
+    // A magnet link has no path: its name is `dn`, and failing that the infohash, which is
+    // still better than the word "download".
+    if url.scheme() == "magnet" {
+        let mut name = None;
+        let mut hash = None;
+        for (key, value) in url.query_pairs() {
+            match key.as_ref() {
+                "dn" => name = Some(value.into_owned()),
+                "xt" => {
+                    if let Some(rest) = value.strip_prefix("urn:btih:") {
+                        hash = Some(rest.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(name) = name.filter(|n| !n.trim().is_empty()) {
+            return sanitize(&name);
+        }
+        if let Some(hash) = hash {
+            return sanitize(&format!("torrent-{}", &hash[..hash.len().min(40)]));
+        }
+        return sanitize("torrent");
+    }
     let last = url
         .path_segments()
         .and_then(|mut segments| segments.rfind(|s: &&str| !s.is_empty()))
