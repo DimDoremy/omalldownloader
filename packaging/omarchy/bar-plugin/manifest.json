@@ -14,7 +14,7 @@
     "displayName": "OmaLLDownloader",
     "description": "Download count and speed, with a popup of every task.",
     "category": "Network",
-    "aliases": ["download", "downloads", "downloader", "omad", "omalldownloader", "transfer"],
+    "aliases": ["download", "downloads", "downloader", "omalld", "omalldownloader", "transfer"],
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {

@@ -95,7 +95,7 @@ command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t 
 echo "==> bar widget into $plugins"
 install -d "$plugins"
 install -m 0644 "$here/omarchy/bar-plugin/manifest.json" "$plugins/manifest.json"
-install -m 0644 "$here/omarchy/bar-plugin/OmaLLDownloaderWidget.qml" "$plugins/OmaLLDownloader.qml"
+install -m 0644 "$here/omarchy/bar-plugin/OmaLLDownloaderWidget.qml" "$plugins/OmaLLDownloaderWidget.qml"
 
 if command -v omarchy >/dev/null 2>&1; then
   echo "==> validating the plugin against the shell schema"
