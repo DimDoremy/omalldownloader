@@ -29,7 +29,7 @@ done
 unset XDG_STATE_HOME || true
 export PATH="$HOME/.local/bin:$PATH"
 bin=${OMAD_BIN:-$root/target/debug/omalldownloader}
-cli=${OMAD_CLI:-$root/target/debug/omad}
+cli=${OMAD_CLI:-$root/target/debug/omalld}
 
 # One private output per run, named by the compositor. Anything left over from an
 # interrupted run is removed first, so a run never stacks outputs.

@@ -59,7 +59,7 @@ fi
 
 if [[ $remove == 1 ]]; then
   echo "==> removing"
-  rm -f "$bin_dir/omalldownloader" "$bin_dir/omad"
+  rm -f "$bin_dir/omalldownloader" "$bin_dir/omalld"
   rm -rf "$app_dir"
   rm -f "$applications/omalldownloader.desktop"
   for size in 16 24 32 48 64 128 256 512; do
@@ -79,7 +79,7 @@ fi
 echo "==> installing the binaries into $bin_dir"
 install -d "$bin_dir"
 install -m 0755 "$root/target/$profile/omalldownloader" "$bin_dir/omalldownloader"
-install -m 0755 "$root/target/$profile/omad" "$bin_dir/omad"
+install -m 0755 "$root/target/$profile/omad" "$bin_dir/omalld"
 
 echo "==> desktop entry and icon"
 install -d "$applications"
@@ -121,10 +121,10 @@ cat <<EOF
 Done.
 
   Launcher   OmaLLDownloader   (the icon is in your applications menu)
-  Command    $bin_dir/omad --help
+  Command    $bin_dir/omalld --help
   Bar        $plugin_id — drag it in the bar, or:
              omarchy bar move $plugin_id right
 
 If the bar widget shows nothing at first, give the shell a moment and click it:
-it reads \`omad tasks --json\` every couple of seconds.
+it reads \`omalld tasks --json\` every couple of seconds.
 EOF

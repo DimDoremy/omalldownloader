@@ -37,7 +37,7 @@ Everything user-level, after a backup:
 | Ghost Downloader | Here |
 |---|---|
 | `~/Applications/Ghost Downloader` | `~/.local/bin/omalldownloader` + `~/.local/share/applications/omalldownloader.desktop` (+ icons) |
-| `ghd` command line | `omad` (`probe`, `add`, `tasks`, `task`, `pause`, `resume`, `remove`, `wait`) |
+| `ghd` command line | `omalld` (`probe`, `add`, `tasks`, `task`, `pause`, `resume`, `remove`, `wait`) |
 | its browser extension | `~/.local/share/omalldownloader/extension` (build output, ready to load unpacked) |
 | its bar presence (none) | `dimdoremy.omalldownloader` Omarchy bar widget |
 | its task list | `~/.local/share/omalldownloader/omalldownloader.sqlite3` |
@@ -62,7 +62,7 @@ Everything user-level, after a backup:
    for `ws://127.0.0.1:14370`, the app trusts the first browser extension that connects and
    hands it a secret, and every later connection proves that secret. Nothing to type.
 
-## What omad took over
+## What omalld took over
 
 | Ghost Downloader | Here |
 |---|---|

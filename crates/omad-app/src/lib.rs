@@ -78,9 +78,9 @@ impl Row {
         }
     }
 
-    fn speed_text(&self) -> String {
+    fn speed_text(&self, lang: omad_core::i18n::Lang) -> String {
         if self.status == TaskStatus::Running && self.speed > 0 {
-            format!("{}/s", human_bytes(self.speed))
+            omad_core::i18n::Key::SpeedPerSecond.with(lang, human_bytes(self.speed))
         } else {
             String::new()
         }
@@ -96,13 +96,14 @@ impl Row {
         }
     }
 
-    fn status_label(&self) -> &'static str {
+    fn status_label(&self, lang: omad_core::i18n::Lang) -> &'static str {
+        use omad_core::i18n::Key;
         match self.status {
-            TaskStatus::Queued => "Queued",
-            TaskStatus::Running => "Downloading",
-            TaskStatus::Paused => "Paused",
-            TaskStatus::Completed => "Done",
-            TaskStatus::Failed => "Failed",
+            TaskStatus::Queued => Key::StatusQueued.text(lang),
+            TaskStatus::Running => Key::StatusRunning.text(lang),
+            TaskStatus::Paused => Key::StatusPaused.text(lang),
+            TaskStatus::Completed => Key::StatusCompleted.text(lang),
+            TaskStatus::Failed => Key::StatusFailed.text(lang),
         }
     }
 
@@ -201,6 +202,7 @@ impl Filter {
 /// The task view. One per window.
 pub struct Tasks {
     host: Arc<dyn EngineHost>,
+    lang: omad_core::i18n::Lang,
     draft: String,
     search: String,
     page: Page,
@@ -237,8 +239,15 @@ impl Render for Tasks {
 
 impl Tasks {
     pub fn new(host: Arc<dyn EngineHost>) -> Self {
+        Self::with_language(host, omad_core::i18n::Lang::from_env())
+    }
+
+    /// The same view in a named language; tests use this so a Chinese `LANG` in the
+    /// environment cannot change what they assert.
+    pub fn with_language(host: Arc<dyn EngineHost>, lang: omad_core::i18n::Lang) -> Self {
         Self {
             host,
+            lang,
             draft: String::new(),
             search: String::new(),
             page: Page::Tasks,
@@ -265,9 +274,13 @@ impl Tasks {
             .iter()
             .find(|r| r.id == id)
             .map(|row| match row.status {
-                TaskStatus::Running | TaskStatus::Queued => "Pause",
-                TaskStatus::Paused | TaskStatus::Failed => "Resume",
-                TaskStatus::Completed => "Open",
+                TaskStatus::Running | TaskStatus::Queued => {
+                    omad_core::i18n::Key::ActionPause.text(self.lang)
+                }
+                TaskStatus::Paused | TaskStatus::Failed => {
+                    omad_core::i18n::Key::ActionResume.text(self.lang)
+                }
+                TaskStatus::Completed => omad_core::i18n::Key::ActionOpen.text(self.lang),
             })
     }
 
@@ -347,7 +360,7 @@ impl Tasks {
             .child(item(
                 "tasks",
                 ICON_TASKS,
-                "Tasks",
+                omad_core::i18n::Key::NavTasks.text(self.lang),
                 Some(total.to_string()),
                 Page::Tasks,
                 self.page == Page::Tasks,
@@ -356,7 +369,7 @@ impl Tasks {
             .child(item(
                 "add",
                 ICON_ADD,
-                "Add a task",
+                omad_core::i18n::Key::NavAdd.text(self.lang),
                 None,
                 Page::Add,
                 self.page == Page::Add,
@@ -376,7 +389,7 @@ impl Tasks {
             .child(item(
                 "extension",
                 ICON_LINK,
-                "Extension",
+                omad_core::i18n::Key::NavExtension.text(self.lang),
                 None,
                 Page::Extension,
                 self.page == Page::Extension,
@@ -385,7 +398,7 @@ impl Tasks {
             .child(item(
                 "settings",
                 ICON_SETTINGS,
-                "Settings",
+                omad_core::i18n::Key::NavSettings.text(self.lang),
                 None,
                 Page::Settings,
                 self.page == Page::Settings,
@@ -408,19 +421,20 @@ impl Tasks {
             Filter::Active => "active",
             Filter::Done => "done",
         };
-        let filter_group = ToggleGroup::new("filter", "Filter tasks")
-            .item("all", "All")
-            .item("active", "Active")
-            .item("done", "Done")
-            .value([current])
-            .on_change(cx.listener(|this, value: &[SharedString], _, cx| {
-                this.filter = match value.first().map(|v| v.as_ref()) {
-                    Some("active") => Filter::Active,
-                    Some("done") => Filter::Done,
-                    _ => Filter::All,
-                };
-                cx.notify();
-            }));
+        let filter_group =
+            ToggleGroup::new("filter", omad_core::i18n::Key::FilterTasks.text(self.lang))
+                .item("all", omad_core::i18n::Key::FilterAll.text(self.lang))
+                .item("active", omad_core::i18n::Key::FilterActive.text(self.lang))
+                .item("done", omad_core::i18n::Key::FilterDone.text(self.lang))
+                .value([current])
+                .on_change(cx.listener(|this, value: &[SharedString], _, cx| {
+                    this.filter = match value.first().map(|v| v.as_ref()) {
+                        Some("active") => Filter::Active,
+                        Some("done") => Filter::Done,
+                        _ => Filter::All,
+                    };
+                    cx.notify();
+                }));
 
         let can_start = all
             .iter()
@@ -438,7 +452,10 @@ impl Tasks {
             .child(filter_group)
             .child(
                 Button::new("start-all")
-                    .label(format!("{ICON_PLAY}  Start all"))
+                    .label(format!(
+                        "{ICON_PLAY}  {}",
+                        omad_core::i18n::Key::StartAll.text(self.lang)
+                    ))
                     .variant(ButtonVariant::Secondary)
                     .disabled(!can_start)
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -448,7 +465,10 @@ impl Tasks {
             )
             .child(
                 Button::new("pause-all")
-                    .label(format!("{ICON_PAUSE}  Pause all"))
+                    .label(format!(
+                        "{ICON_PAUSE}  {}",
+                        omad_core::i18n::Key::PauseAll.text(self.lang)
+                    ))
                     .variant(ButtonVariant::Secondary)
                     .disabled(!can_pause)
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -464,7 +484,7 @@ impl Tasks {
             })
             .child(
                 div().w(px(200.0)).child(
-                    SearchInput::new("search", "Search tasks")
+                    SearchInput::new("search", omad_core::i18n::Key::SearchTasks.text(self.lang))
                         .value(self.search.clone())
                         .placeholder("Search")
                         .on_change(cx.listener(|this, value: &str, _, cx| {
@@ -494,16 +514,12 @@ impl Tasks {
 
     fn empty_state(&self, nothing_at_all: bool) -> AnyElement {
         let (glyph, title, hint) = if nothing_at_all {
-            (
-                ICON_ADD,
-                "No downloads yet",
-                "Paste a link on the Add page, or send one from the browser extension.",
-            )
+            (ICON_ADD, omad_core::i18n::Key::NoTasks.text(self.lang), "")
         } else {
             (
                 ICON_TASKS,
-                "Nothing in this view",
-                "Another filter or a shorter search may show tasks.",
+                omad_core::i18n::Key::NoResults.text(self.lang),
+                "",
             )
         };
         v_flex()
@@ -519,6 +535,7 @@ impl Tasks {
     }
 
     fn task_card(&self, row: &Row, cx: &mut Context<Self>) -> AnyElement {
+        let lang = self.lang;
         let id = row.id;
         let status = row.status;
         let can_pause = matches!(status, TaskStatus::Running | TaskStatus::Queued);
@@ -535,8 +552,8 @@ impl Tasks {
         let meta = h_flex()
             .gap(Space::Md)
             .items_center()
-            .when(!row.speed_text().is_empty(), |el| {
-                el.child(Text::new(row.speed_text()).muted())
+            .when(!row.speed_text(lang).is_empty(), |el| {
+                el.child(Text::new(row.speed_text(lang)).muted())
             })
             .when(!row.eta_text().is_empty(), |el| {
                 el.child(Text::new(format!("{} left", row.eta_text())).muted())
@@ -551,13 +568,17 @@ impl Tasks {
             .items_center()
             .child(if done {
                 Button::new(SharedString::from(format!("toggle-{id}")))
-                    .label("Open")
+                    .label(omad_core::i18n::Key::ActionOpen.text(lang))
                     .variant(ButtonVariant::Primary)
                     .on_click(cx.listener(move |this, _, _, _| this.host.open_file(id)))
                     .into_any_element()
             } else {
                 Button::new(SharedString::from(format!("toggle-{id}")))
-                    .label(if can_pause { "Pause" } else { "Resume" })
+                    .label(if can_pause {
+                        omad_core::i18n::Key::ActionPause.text(lang)
+                    } else {
+                        omad_core::i18n::Key::ActionResume.text(lang)
+                    })
                     .variant(ButtonVariant::Primary)
                     .disabled(!(can_pause || can_resume))
                     .on_click(cx.listener(move |this, _, _, _| {
@@ -571,14 +592,14 @@ impl Tasks {
             })
             .child(
                 Button::new(SharedString::from(format!("reveal-{id}")))
-                    .label("Folder")
+                    .label(omad_core::i18n::Key::ActionFolder.text(lang))
                     .variant(ButtonVariant::Secondary)
                     .disabled(!done)
                     .on_click(cx.listener(move |this, _, _, _| this.host.reveal(id))),
             )
             .child(
                 Button::new(SharedString::from(format!("remove-{id}")))
-                    .label("Remove")
+                    .label(omad_core::i18n::Key::ActionRemove.text(lang))
                     .variant(ButtonVariant::Secondary)
                     .on_click(cx.listener(move |this, _, _, _| this.host.remove(id))),
             );
@@ -620,7 +641,7 @@ impl Tasks {
                         h_flex()
                             .gap(Space::Xs)
                             .items_center()
-                            .child(Badge::new(row.status_label()).tone(tone))
+                            .child(Badge::new(row.status_label(lang)).tone(tone))
                             .child(actions),
                     ),
             )
@@ -635,7 +656,7 @@ impl Tasks {
             .w_full()
             .p(Space::Lg)
             .gap(Space::Md)
-            .child(Text::new("Paste a link. The server decides the name.").muted())
+            .child(Text::new(omad_core::i18n::Key::AddPlaceholder.text(self.lang)).muted())
             .child(
                 div().w_full().child(
                     Input::new("url", "Link")
@@ -652,7 +673,7 @@ impl Tasks {
                     .gap(Space::Sm)
                     .child(
                         Button::new("add")
-                            .label("Download")
+                            .label(omad_core::i18n::Key::AddButton.text(self.lang))
                             .variant(ButtonVariant::Primary)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 let url = this.draft.trim().to_string();
@@ -666,7 +687,7 @@ impl Tasks {
                     )
                     .child(
                         Button::new("cancel-add")
-                            .label("Cancel")
+                            .label(omad_core::i18n::Key::AddCancel.text(self.lang))
                             .variant(ButtonVariant::Secondary)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.draft.clear();
@@ -676,11 +697,16 @@ impl Tasks {
                     ),
             )
             .child(Separator::horizontal())
-            .child(Text::new(format!("Saving to {}", self.host.download_dir())).muted());
+            .child(
+                Text::new(omad_core::i18n::Key::SavingTo.with(self.lang, self.host.download_dir()))
+                    .muted(),
+            );
 
         v_flex()
             .size_full()
-            .child(page_header("Add a task"))
+            .child(page_header(
+                omad_core::i18n::Key::PageAddTitle.text(self.lang),
+            ))
             .child(form)
             .into_any_element()
     }
@@ -690,7 +716,9 @@ impl Tasks {
     fn settings_page(&self) -> AnyElement {
         v_flex()
             .size_full()
-            .child(page_header("Settings"))
+            .child(page_header(
+                omad_core::i18n::Key::PageSettingsTitle.text(self.lang),
+            ))
             .child(
                 v_flex()
                     .p(Space::Lg)
@@ -713,45 +741,36 @@ impl Tasks {
     // ---------------------------------------------------------------- extension
 
     fn extension_page(&self, _cx: &mut Context<Self>) -> AnyElement {
+        use omad_core::i18n::Key;
         let paired = self.host.paired_browsers();
         let status = match paired {
-            0 => "No browser has connected yet.".to_string(),
-            1 => "1 browser connected.".to_string(),
-            n => format!("{n} browsers connected."),
+            0 => Key::ExtensionNoBrowser.text(self.lang).to_string(),
+            1 => Key::ExtensionOneBrowser.text(self.lang).to_string(),
+            n => Key::ExtensionManyBrowsers.with(self.lang, n),
         };
         let panel = v_flex()
             .p(Space::Lg)
             .gap(Space::Md)
-            .child(
-                Text::new(
-                    "The extension connects by itself: it looks for this address, and the \
-                     first time it does, this app trusts it and hands it a secret. Nothing to \
-                     type, and nothing to copy. A web page cannot take that place — only a \
-                     browser extension origin is accepted.",
-                )
-                .muted(),
-            )
+            .child(Text::new(Key::ExtensionExplains.text(self.lang)).muted())
             .child(
                 h_flex()
                     .gap(Space::Sm)
                     .items_center()
-                    .child(Text::new("Address").muted())
+                    .child(
+                        Text::new(omad_core::i18n::Key::ExtensionAddress.text(self.lang)).muted(),
+                    )
                     .child(Text::new(self.host.bridge_summary())),
             )
             .child(Text::new(status).muted())
             .child(Separator::horizontal())
-            .child(Heading::new("Loading the extension").level(3))
-            .child(
-                Text::new(
-                    "Edge or Chrome: edge://extensions, turn on Developer mode, Load unpacked, \
-                     and choose ~/.local/share/omalldownloader/extension.",
-                )
-                .muted(),
-            );
+            .child(Heading::new(Key::ExtensionLoadingTitle.text(self.lang)).level(3))
+            .child(Text::new(Key::ExtensionLoadingText.text(self.lang)).muted());
 
         v_flex()
             .size_full()
-            .child(page_header("Browser extension"))
+            .child(page_header(
+                omad_core::i18n::Key::PageExtensionTitle.text(self.lang),
+            ))
             .child(panel)
             .into_any_element()
     }
@@ -1071,10 +1090,10 @@ mod tests {
     fn speed_and_eta_only_show_while_running() {
         let mut r = row(1, "a", TaskStatus::Running, 0, Some(1000));
         r.speed = 500;
-        assert_eq!(r.speed_text(), "500 B/s");
+        assert_eq!(r.speed_text(omad_core::i18n::Lang::En), "500 B/s");
         assert_eq!(r.eta_text(), "2s");
         r.status = TaskStatus::Paused;
-        assert_eq!(r.speed_text(), "");
+        assert_eq!(r.speed_text(omad_core::i18n::Lang::En), "");
         assert_eq!(r.eta_text(), "");
     }
 

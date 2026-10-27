@@ -70,7 +70,7 @@ packs::kind_of(url)   ftp/ftps → Ftp     .m3u8/.m3u → Hls
 ```
 
 `Engine::run_task` asks `kind_of` before it probes. A pack reports progress through the same
-`StoreSink` the HTTP path uses, so the window, the bar and `omad tasks` show it the same way;
+`StoreSink` the HTTP path uses, so the window, the bar and `omalld tasks` show it the same way;
 the stop signal is honoured, so pause works for packs too. A magnet or eD2k URL is refused by
 the CLI and by the app with a sentence, not with a silent failure.
 

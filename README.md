@@ -17,7 +17,7 @@ crates/omad-store    SQLite task records, resumable across restarts
 crates/omad-engine   chunked HTTP(S) with range requests, resume and digest verification
 crates/omad-rpc      the loopback bridge the Chrome extension talks to
 crates/omad-app      the GPUI window (ODK components, ODK theme)
-crates/omad-cli        `omad`, the command line
+crates/omad-cli        `omalld`, the command line
 crates/omad-app-tests  the window's tests, apart so `test-support` never ships
 extension/             the Chrome extension (Manifest V3, no bundler)
 packaging/             the Omarchy desktop entry, icon and bar widget, plus the installer
@@ -35,13 +35,13 @@ cargo test --workspace         # 84 tests, no network needed
 The CLI:
 
 ```sh
-omad probe https://example.com/big.iso        # size, name, ranges; downloads nothing
-omad add https://example.com/big.iso          # download it now
-omad add https://example.com/big.iso --name "My ISO"
-omad tasks                                    # or --json
-omad task tsk_3
-omad resume tsk_3
-omad wait tsk_3 --timeout 600
+omalld probe https://example.com/big.iso        # size, name, ranges; downloads nothing
+omalld add https://example.com/big.iso          # download it now
+omalld add https://example.com/big.iso --name "My ISO"
+omalld tasks                                    # or --json
+omalld task tsk_3
+omalld resume tsk_3
+omalld wait tsk_3 --timeout 600
 ```
 
 Loopback and private addresses are refused unless `--allow-private-network` is given.
@@ -59,7 +59,7 @@ It installs three things under `$HOME`, no root:
 * **the launcher entry** — `~/.local/share/applications/omalldownloader.desktop` and the
   icon at every size in `~/.local/share/icons/hicolor`, so the app appears in the Omarchy
   menu like any other program;
-* **the executables** — `~/.local/bin/omalldownloader` and `~/.local/bin/omad`;
+* **the executables** — `~/.local/bin/omalldownloader` and `~/.local/bin/omalld`;
 * **the bar widget** — `~/.config/omarchy/plugins/dimdoremy.omalldownloader/`, validated
   against the shell's schema and placed in the bar's right section. It shows a download
   glyph, how many tasks are running and their combined speed, and opens a popup listing
@@ -81,6 +81,13 @@ omarchy-shell dimdoremy.omalldownloader.HDMI-A-1 toggle   # open the popup on th
 The popup lists every task with its status, progress, size and live speed, offers Pause or
 Resume and Remove per task, and shows a running total at the top. It reads the same
 `omad tasks --json` the window and the CLI read.
+
+## Languages
+
+The window and the command line speak English and Chinese. The language comes from
+`OMAD_LANG` (`en`/`zh`), otherwise from `LC_ALL`/`LANG`; an unknown locale falls back to
+English. Every string lives in `crates/omad-core/src/i18n.rs` behind a `Key`, so a missing
+translation is a compile error rather than a blank label.
 
 ## Protocols
 

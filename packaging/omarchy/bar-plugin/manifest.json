@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "DimDoremy",
   "license": "MIT",
-  "description": "Download activity in the Omarchy bar: how many tasks are running, the total speed, and a popup with each task's progress. Reads `omad tasks --json`, so it shows the same list the app and the CLI see.",
+  "description": "Download activity in the Omarchy bar: how many tasks are running, the total speed, and a popup with each task's progress. Reads `omalld tasks --json`, so it shows the same list the app and the CLI see.",
   "kinds": ["bar-widget"],
   "entryPoints": {
     "barWidget": "OmaLLDownloaderWidget.qml"
@@ -18,7 +18,7 @@
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "omadPath": "omad",
+      "omalldPath": "omalld",
       "refreshSeconds": 2,
       "showWhenIdle": true,
       "label": "speed"
@@ -27,9 +27,9 @@
       {
         "key": "omadPath",
         "type": "string",
-        "label": "omad command",
-        "description": "Path to the omad executable, if it is not on the shell's PATH.",
-        "defaultValue": "omad"
+        "label": "omalld command",
+        "description": "Path to the omalld executable, if it is not on the shell's PATH.",
+        "defaultValue": "omalld"
       },
       {
         "key": "refreshSeconds",

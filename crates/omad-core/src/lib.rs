@@ -6,6 +6,7 @@
 //! windowing crate ever reaches this layer.
 
 pub mod filename;
+pub mod i18n;
 pub mod id;
 pub mod path;
 pub mod ssrf;

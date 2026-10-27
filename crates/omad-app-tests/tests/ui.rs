@@ -110,8 +110,11 @@ fn row(id: u64, name: &str, status: TaskStatus, received: u64, total: Option<u64
 }
 
 fn open(cx: &mut TestAppContext, host: Arc<FakeHost>) -> (&mut VisualTestContext, Entity<Tasks>) {
-    let (entity, visual) =
-        odk::ui::test_support::open_view(cx, move |_, cx| cx.new(|_| Tasks::new(host)));
+    let (entity, visual) = odk::ui::test_support::open_view(cx, move |_, cx| {
+        // Pinned to English: a Chinese `LANG` in the environment must not change what
+        // these tests assert.
+        cx.new(|_| Tasks::with_language(host, omad_core::i18n::Lang::En))
+    });
     visual.run_until_parked();
     (visual, entity)
 }

@@ -40,14 +40,14 @@ On `Doremys-MacBook-Pro-3.local` (macOS 27.2, arm64), over SSH:
 $ cargo build --release --workspace
     Finished `release` profile [optimized] target(s) in 2m 03s
 
-$ omad probe http://127.0.0.1:18999/src.bin
+$ omalld probe http://127.0.0.1:18999/src.bin
 url:        http://127.0.0.1:18999/src.bin
 status:     200
 size:       390.6 KB
 ranges:     no
 name:       src.bin
 
-$ omad --allow-private-network add http://127.0.0.1:18999/src.bin
+$ omalld --allow-private-network add http://127.0.0.1:18999/src.bin
 completed
 saved to /private/tmp/omad-mac/dl/src.bin
 

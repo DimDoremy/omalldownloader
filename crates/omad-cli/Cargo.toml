@@ -4,10 +4,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 version.workspace = true
-description = "OmaLLDownloader command line (omad)"
+description = "OmaLLDownloader command line (omalld)"
 
 [[bin]]
-name = "omad"
+name = "omalld"
 path = "src/main.rs"
 
 [dependencies]

@@ -203,10 +203,10 @@ someone else's behalf (`omad-core/src/ssrf.rs`).
 ## A recorded run
 
 ```
-$ omad probe http://127.0.0.1:18901/source.bin
-omad: ... is not a URL the downloader will fetch: PrivateAddress(127.0.0.1)
+$ omalld probe http://127.0.0.1:18901/source.bin
+omalld: ... is not a URL the downloader will fetch: PrivateAddress(127.0.0.1)
 
-$ omad --allow-private-network --dir /tmp/e2e/downloads add http://127.0.0.1:18901/source.bin
+$ omalld --allow-private-network --dir /tmp/e2e/downloads add http://127.0.0.1:18901/source.bin
 added tsk_1
 completed
 saved to /tmp/e2e/downloads/report.bin      # the name the server sent

@@ -1,11 +1,12 @@
-//! `omad`: the OmaLLDownloader command line.
+//! `omalld`: the OmaLLDownloader command line.
 //!
 //! It owns a task list of its own — the same store the application uses — so it works
 //! with the window open or closed. Two commands matter for scripting: `probe` asks what a
 //! URL is without downloading it, and `wait` blocks until a task finishes, which makes
-//! `omad add ... && omad wait ...` a working pipeline.
+//! `omalld add ... && omalld wait ...` a working pipeline.
 
 use clap::{Parser, Subcommand};
+use omad_core::i18n::{Key, Lang};
 use omad_core::ssrf::UrlPolicy;
 use omad_core::{TaskId, TaskStatus, filename};
 use omad_engine::engine::Plan;
@@ -17,7 +18,7 @@ use std::sync::Arc;
 
 #[derive(Parser)]
 #[command(
-    name = "omad",
+    name = "omalld",
     version,
     about = "OmaLLDownloader: a download manager from the command line"
 )]
@@ -85,12 +86,13 @@ enum Command {
 fn main() {
     let cli = Cli::parse();
     if let Err(error) = run(cli) {
-        eprintln!("omad: {error}");
+        eprintln!("omalld: {error}");
         std::process::exit(1);
     }
 }
 
 fn run(cli: Cli) -> anyhow::Result<()> {
+    let lang = Lang::from_env();
     let paths = Paths::discover(cli.dir.as_ref())?;
     let store = Store::open(paths.state.join("omalldownloader.sqlite3"))?;
     let root = omad_core::path::DownloadRoot::new(&paths.downloads)?;
@@ -189,11 +191,11 @@ fn run(cli: Cli) -> anyhow::Result<()> {
                 connections: connections.clamp(1, omad_engine::engine::MAX_CONNECTIONS),
                 allow_private: allow_private_network,
             })?;
-            println!("added {}", record.id);
+            println!("{} {}", Key::CliAdded.text(lang), record.id);
             let outcome = download(&runtime, &store, record, parsed, path.clone(), policy)?;
-            println!("{}", outcome_label(outcome));
+            println!("{}", outcome_label(outcome, lang));
             if outcome == Outcome::Completed {
-                println!("saved to {}", path.display());
+                println!("{} {}", Key::CliSavedTo.text(lang), path.display());
             } else {
                 std::process::exit(2);
             }
@@ -216,17 +218,20 @@ fn run(cli: Cli) -> anyhow::Result<()> {
                     .collect();
                 println!("{}", serde_json::to_string_pretty(&rows)?);
             } else if records.is_empty() {
-                println!("no tasks");
+                println!("{}", Key::CliNoTasks.text(lang));
             } else {
                 println!(
                     "{:<10} {:<10} {:>12} {:<28}",
-                    "ID", "STATE", "PROGRESS", "NAME"
+                    Key::ColId.text(lang),
+                    Key::ColState.text(lang),
+                    Key::ColProgress.text(lang),
+                    Key::ColName.text(lang)
                 );
                 for r in &records {
                     println!(
                         "{:<10} {:<10} {:>12} {}",
                         r.id.to_string(),
-                        r.status.as_str(),
+                        status_word(r.status, lang),
                         progress_text(r),
                         r.filename
                     );
@@ -262,19 +267,19 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             let parsed = parse_url(&record.url)?;
             let path = PathBuf::from(&record.file_path);
             let outcome = download(&runtime, &store, record, parsed, path.clone(), policy)?;
-            println!("{}", outcome_label(outcome));
+            println!("{}", outcome_label(outcome, lang));
         }
 
         Command::Pause { id } => {
             let id = parse_id(&id)?;
             store.set_status(id, TaskStatus::Paused, None)?;
-            println!("paused {id}");
+            println!("{} {id}", Key::CliPaused.text(lang));
         }
 
         Command::Remove { id } => {
             let id = parse_id(&id)?;
             store.delete(id)?;
-            println!("removed {id} (the file was kept)");
+            println!("{} {id}", Key::CliRemoved.text(lang));
         }
 
         Command::Wait { id, timeout } => {
@@ -336,7 +341,7 @@ fn download(
         .and_then(|json| Plan::from_json(&json))
         .filter(|_| record.status != TaskStatus::Completed);
 
-    // `omad pause` runs in another process, so this one watches the record: a pause
+    // `omalld pause` runs in another process, so this one watches the record: a pause
     // written there by anyone stops this transfer at its next read.
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
     let watcher_store = store.clone();
@@ -407,10 +412,22 @@ impl StoreSink for CliSink {
     }
 }
 
-fn outcome_label(outcome: Outcome) -> &'static str {
+/// The word a status shows, in the language the environment asks for.
+fn status_word(status: omad_core::TaskStatus, lang: Lang) -> &'static str {
+    use omad_core::TaskStatus;
+    match status {
+        TaskStatus::Queued => Key::StatusQueued.text(lang),
+        TaskStatus::Running => Key::StatusRunning.text(lang),
+        TaskStatus::Paused => Key::StatusPaused.text(lang),
+        TaskStatus::Completed => Key::StatusCompleted.text(lang),
+        TaskStatus::Failed => Key::StatusFailed.text(lang),
+    }
+}
+
+fn outcome_label(outcome: Outcome, lang: Lang) -> &'static str {
     match outcome {
-        Outcome::Completed => "completed",
-        Outcome::Paused => "paused",
+        Outcome::Completed => Key::CliCompleted.text(lang),
+        Outcome::Paused => Key::CliPaused.text(lang),
     }
 }
 

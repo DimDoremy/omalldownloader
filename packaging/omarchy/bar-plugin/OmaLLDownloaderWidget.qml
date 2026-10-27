@@ -8,7 +8,7 @@ import qs.Ui
 // OmaLLDownloader in the bar: a download glyph, how many tasks are running and their
 // combined speed. The popup lists each task with its own progress line.
 //
-// It reads `omad tasks --json` — the same record the window and the CLI use — so there is
+// It reads `omalld tasks --json` — the same record the window and the CLI use — so there is
 // one source of truth and no second daemon.
 Panel {
   id: root
@@ -23,7 +23,7 @@ Panel {
   }
 
   readonly property string glyph: "\uf019"   // nf-fa-download
-  readonly property string cmd: String(setting("omadPath", "omad"))
+  readonly property string cmd: String(setting("omalldPath", "omalld"))
   readonly property int refreshMs: Math.max(1, Number(setting("refreshSeconds", 2)) || 2) * 1000
   readonly property string labelMode: String(setting("label", "speed"))
 
