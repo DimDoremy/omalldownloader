@@ -1,5 +1,9 @@
 //! Site extraction is delegated: a fake `yt-dlp` on PATH proves the wiring (a real one
 //! would need the network and a page that still parses).
+//!
+//! Unix only: the stand-in is a shell script made executable with a mode bit. The code
+//! under test is the same on Windows, where it spawns `yt-dlp.exe`.
+#![cfg(unix)]
 
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
