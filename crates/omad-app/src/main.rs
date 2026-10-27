@@ -340,6 +340,9 @@ async fn add_and_run(
     // supplies either (R2).
     let path = target.root.resolve(None, &name)?;
     let connections = 8u8;
+    // A link that came from the browser may not reach loopback or the LAN, unless the user
+    // asked for it. `OMAD_ALLOW_PRIVATE` is the escape hatch for a local test server.
+    let allow_private = allow_private || std::env::var_os("OMAD_ALLOW_PRIVATE").is_some();
 
     let record = target.store.create(NewTask {
         url: url.clone(),

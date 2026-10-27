@@ -74,6 +74,27 @@ jobs:
       - name: Test the engine and the core
         run: cargo test --release -p omad-core -p omad-store -p omad-engine
 
+      - name: Package the AppImage
+        if: matrix.name == 'linux-x86_64'
+        run: |
+          curl -fsSL -o /tmp/appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /tmp/appimagetool
+          packaging/make-appimage.sh --tool /tmp/appimagetool
+
+      - name: Upload the AppImage
+        if: matrix.name == 'linux-x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: OmaLLDownloader-x86_64.AppImage
+          path: dist-appimage/OmaLLDownloader-x86_64.AppImage
+
+      - name: Attach the AppImage to the release
+        if: matrix.name == 'linux-x86_64' && startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" dist-appimage/OmaLLDownloader-x86_64.AppImage --clobber
+
       - name: Upload the binaries
         uses: actions/upload-artifact@v4
         with:

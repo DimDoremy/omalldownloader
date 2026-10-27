@@ -82,6 +82,22 @@ The popup lists every task with its status, progress, size and live speed, offer
 Resume and Remove per task, and shows a running total at the top. It reads the same
 `omad tasks --json` the window and the CLI read.
 
+## Releases
+
+Tagged releases attach `OmaLLDownloader-x86_64.AppImage` (built by
+`packaging/make-appimage.sh`, also run in CI):
+
+```sh
+gh release download v1.0.0 -R DimDoremy/omalldownloader -p '*AppImage'
+chmod +x OmaLLDownloader-x86_64.AppImage
+./OmaLLDownloader-x86_64.AppImage        # the window; `omalld` is inside the image too
+```
+
+`extension/tests/e2e/appimage.test.mjs` starts a released AppImage, loads the extension in
+Chromium over CDP, downloads a file from a page, and checks that the bytes the AppImage
+wrote are the bytes the server sent. Run it with
+`OMAD_APPIMAGE=… node --test extension/tests/e2e/appimage.test.mjs`.
+
 ## Languages
 
 The window and the command line speak English and Chinese. The language comes from
