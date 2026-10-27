@@ -30,6 +30,38 @@ pub enum Kind {
     Ftp,
     /// A magnet link or a `.torrent`, downloaded by the in-process BitTorrent engine.
     Bt,
+    /// A page whose media only a site extractor can find (YouTube, Bilibili, …).
+    Site,
+}
+
+/// Hosts whose media is behind a player rather than at a URL a download manager can fetch.
+/// `yt-dlp` is what knows how to get it, and it maintains that knowledge; hard-coding
+/// extraction here would rot within weeks.
+const SITE_HOSTS: &[&str] = &[
+    "youtube.com",
+    "youtu.be",
+    "m.youtube.com",
+    "music.youtube.com",
+    "bilibili.com",
+    "b23.tv",
+    "vimeo.com",
+    "twitter.com",
+    "x.com",
+    "nicovideo.jp",
+    "twitch.tv",
+    "dailymotion.com",
+    "soundcloud.com",
+];
+
+/// Is this a page a site extractor has to open?
+pub fn is_site(url: &Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    SITE_HOSTS
+        .iter()
+        .any(|known| host == *known || host.ends_with(&format!(".{known}")))
 }
 
 /// An `ed2k://` link: not a URL the `url` crate can even parse (the `|` separators are not
@@ -73,6 +105,8 @@ pub fn kind_of(url: &Url) -> Kind {
         Kind::Dash
     } else if path.ends_with(".torrent") {
         Kind::Bt
+    } else if is_site(url) {
+        Kind::Site
     } else {
         Kind::Http
     }
@@ -222,27 +256,75 @@ pub async fn run_hls(ctx: &PackContext<'_>, url: &Url) -> Result<u64, PackError>
     Ok(written)
 }
 
-/// DASH: follow the MPD's first `BaseURL`, which for a single-representation stream is the
-/// segment or the directory of segments. A full segment-template reader is a later job.
+/// DASH: read the manifest, pick the best representation, and fetch its segments in order.
+///
+/// A segment that answers 404 ends the stream: that is how a template with no
+/// `SegmentTimeline` (and no `Period` duration) says "there is no more". Everything already
+/// fetched is kept, so a live stream leaves a playable prefix rather than nothing.
 pub async fn run_dash(ctx: &PackContext<'_>, url: &Url) -> Result<u64, PackError> {
+    use std::io::Write;
+
     let text = String::from_utf8_lossy(&get_bytes(ctx.client, url, ctx.policy, &ctx.stop).await?)
         .into_owned();
-    let base = parse_mpd(&text, url).ok_or_else(|| {
-        PackError::Unsupported("this MPD has no BaseURL this build understands".into())
+    let representation = crate::dash::parse(&text, url).ok_or_else(|| {
+        PackError::Unsupported("this MPD has no representation this build understands".into())
     })?;
-    let bytes = get_bytes(ctx.client, &base, ctx.policy, &ctx.stop).await?;
-    std::fs::write(ctx.target, &bytes).map_err(|e| PackError::Io(e.to_string()))?;
-    let len = bytes.len() as u64;
-    ctx.sink.on_progress(
-        ctx.id,
-        &Progress {
-            received: len,
-            total: Some(len),
-            speed: 0,
-        },
-    );
-    ctx.sink.on_commit(ctx.id, len, Some(len), 0);
-    Ok(len)
+
+    // With a timeline the segment list is complete; without one the manifest does not say
+    // where the stream ends, so numbers are asked for until the server says 404.
+    let open_ended = representation.timeline.is_empty();
+    // Either the whole list, or just the initialization segment, which comes first either way.
+    let mut queue: std::collections::VecDeque<Url> = if open_ended {
+        representation.initialization_url().into_iter().collect()
+    } else {
+        representation.segment_urls().into()
+    };
+    if queue.is_empty() && !open_ended {
+        return Err(PackError::Empty);
+    }
+    let mut number = representation.start_number;
+
+    let mut file = std::fs::File::create(ctx.target).map_err(|e| PackError::Io(e.to_string()))?;
+    let mut written = 0u64;
+    let started = Instant::now();
+    loop {
+        if stopped(&ctx.stop) {
+            return Err(PackError::Paused);
+        }
+        let Some(segment) = queue.pop_front().or_else(|| {
+            // Nothing queued: with an open-ended template, ask for the next number.
+            if !open_ended {
+                return None;
+            }
+            let url = representation.segment_url(number);
+            number += 1;
+            url
+        }) else {
+            break;
+        };
+        match get_bytes(ctx.client, &segment, ctx.policy, &ctx.stop).await {
+            Ok(bytes) => {
+                file.write_all(&bytes)
+                    .map_err(|e| PackError::Io(e.to_string()))?;
+                written += bytes.len() as u64;
+                let elapsed = started.elapsed().as_secs_f64().max(0.001);
+                ctx.sink.on_progress(
+                    ctx.id,
+                    &Progress {
+                        received: written,
+                        total: None,
+                        speed: (written as f64 / elapsed) as u64,
+                    },
+                );
+            }
+            // A template with no timeline has no last segment; the 404 is the end.
+            Err(PackError::Status(404)) if open_ended => break,
+            Err(error) => return Err(error),
+        }
+    }
+    std::io::Write::flush(&mut file).map_err(|e| PackError::Io(e.to_string()))?;
+    ctx.sink.on_commit(ctx.id, written, None, 0);
+    Ok(written)
 }
 
 /// FTP: control connection, `TYPE I`, `SIZE`, `REST` for a resume, then a passive data
@@ -467,6 +549,7 @@ pub async fn run_pack(ctx: &PackContext<'_>, url: &Url) -> Result<u64, PackError
         Kind::Dash => run_dash(ctx, url).await,
         Kind::Ftp => run_ftp(ctx, url).await,
         Kind::Bt => run_bt(ctx, url).await,
+        Kind::Site => run_site(ctx, url).await,
         Kind::Http => Err(PackError::Unsupported("handled by the engine".into())),
     }
 }
@@ -489,6 +572,26 @@ pub fn to_engine(error: PackError) -> EngineError {
 /// same: the sink hears about progress, the stop signal pauses the torrent, and the task is
 /// only reported complete when librqbit says every piece is verified.
 pub async fn run_bt(ctx: &PackContext<'_>, url: &Url) -> Result<u64, PackError> {
+    // `OMAD_BT_PEERS` is a debugging hook (and what the end-to-end test uses): a list of
+    // `host:port` peers to start from, so a torrent can be fetched without a tracker or DHT.
+    let peers = std::env::var("OMAD_BT_PEERS")
+        .ok()
+        .map(|list| {
+            list.split(',')
+                .filter_map(|one| one.trim().parse().ok())
+                .collect::<Vec<std::net::SocketAddr>>()
+        })
+        .filter(|peers: &Vec<std::net::SocketAddr>| !peers.is_empty());
+    run_bt_with_peers(ctx, url, peers).await
+}
+
+/// The BitTorrent pack, with the initial peers spelled out. [`run_bt`] is this plus the
+/// environment hook; a test calls it directly so it never depends on the environment.
+pub async fn run_bt_with_peers(
+    ctx: &PackContext<'_>,
+    url: &Url,
+    peers: Option<Vec<std::net::SocketAddr>>,
+) -> Result<u64, PackError> {
     use librqbit::{AddTorrent, AddTorrentOptions, Session};
 
     // The task's file path is `<download folder>/<name>.<ext>`; a torrent writes a directory
@@ -513,6 +616,7 @@ pub async fn run_bt(ctx: &PackContext<'_>, url: &Url) -> Result<u64, PackError> 
             Some(AddTorrentOptions {
                 // Resuming a torrent writes over files it already verified.
                 overwrite: true,
+                initial_peers: peers.clone(),
                 ..Default::default()
             }),
         ) => added.map_err(|e| PackError::Transport(format!("could not add the torrent: {e}")))?,
@@ -563,6 +667,88 @@ pub async fn run_bt(ctx: &PackContext<'_>, url: &Url) -> Result<u64, PackError> 
     }
 }
 
+/// A page that needs a site extractor: handed to `yt-dlp`.
+///
+/// The same reasoning as eD2k — the extraction rules change constantly and `yt-dlp` is the
+/// project that keeps up — with one difference: this build *can* run it end to end, so the
+/// output lands in the task's own file and progress is reported from the growing file.
+pub async fn run_site(ctx: &PackContext<'_>, url: &Url) -> Result<u64, PackError> {
+    use std::process::Stdio;
+
+    if policy_denied(ctx.policy, url) {
+        return Err(PackError::Unsupported(format!(
+            "{url} is not a host we fetch"
+        )));
+    }
+    let program = std::env::var("OMAD_YTDLP").unwrap_or_else(|_| "yt-dlp".to_string());
+    let mut child = tokio::process::Command::new(&program)
+        .arg("--no-playlist")
+        .arg("--no-progress")
+        .arg("-f")
+        .arg("best")
+        .arg("-o")
+        .arg(ctx.target)
+        .arg(url.as_str())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            PackError::Missing(format!(
+                "this page needs `{program}` on PATH (install yt-dlp, or set OMAD_YTDLP): {e}"
+            ))
+        })?;
+
+    let started = Instant::now();
+    let mut last = 0u64;
+    loop {
+        if stopped(&ctx.stop) {
+            let _ = child.kill().await;
+            return Err(PackError::Paused);
+        }
+        let size = std::fs::metadata(ctx.target).map(|m| m.len()).unwrap_or(0);
+        if size != last {
+            let elapsed = started.elapsed().as_secs_f64().max(0.001);
+            ctx.sink.on_progress(
+                ctx.id,
+                &Progress {
+                    received: size,
+                    total: None,
+                    speed: ((size - last) as f64 / elapsed) as u64,
+                },
+            );
+            ctx.sink.on_commit(ctx.id, size, None, 0);
+            last = size;
+        }
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => {
+                let size = std::fs::metadata(ctx.target)
+                    .map(|m| m.len())
+                    .unwrap_or(last);
+                return Ok(size);
+            }
+            Ok(Some(status)) => {
+                let mut stderr = String::new();
+                if let Some(mut pipe) = child.stderr.take() {
+                    use tokio::io::AsyncReadExt;
+                    let _ = pipe.read_to_string(&mut stderr).await;
+                }
+                let reason = stderr
+                    .lines()
+                    .last()
+                    .unwrap_or("yt-dlp failed")
+                    .trim()
+                    .to_string();
+                return Err(PackError::Transport(format!(
+                    "{program} exited with {status}: {reason}"
+                )));
+            }
+            Ok(None) => {}
+            Err(error) => return Err(PackError::Transport(error.to_string())),
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -597,6 +783,21 @@ mod tests {
             "ed2k://|file|a.iso|1024|0123456789ABCDEF0123456789ABCDEF|/"
         ));
         assert!(!is_ed2k("magnet:?xt=urn:btih:0123"));
+    }
+
+    #[test]
+    fn a_known_site_is_handed_to_the_extractor_and_a_normal_url_is_not() {
+        assert!(is_site(&url("https://www.youtube.com/watch?v=abc")));
+        assert!(is_site(&url("https://youtu.be/abc")));
+        assert!(is_site(&url("https://www.bilibili.com/video/BV1xx")));
+        assert!(!is_site(&url("https://example.com/file.iso")));
+        // A lookalike domain must not match.
+        assert!(!is_site(&url("https://youtube.com.evil.example/watch")));
+        assert_eq!(
+            kind_of(&url("https://www.youtube.com/watch?v=abc")),
+            Kind::Site
+        );
+        assert_eq!(kind_of(&url("https://example.com/file.iso")), Kind::Http);
     }
 
     #[test]

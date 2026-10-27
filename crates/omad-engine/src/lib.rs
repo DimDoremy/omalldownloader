@@ -19,6 +19,7 @@
 //! * Nothing is marked complete until the bytes are on disk and, when the server gave
 //!   a digest, the digest matches ([`engine::Engine::finish`]).
 
+pub mod dash;
 pub mod engine;
 pub mod http;
 pub mod packs;

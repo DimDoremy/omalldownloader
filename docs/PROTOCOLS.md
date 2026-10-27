@@ -7,10 +7,10 @@ What this build downloads, how each one is tested, and what is still missing.
 | HTTP/HTTPS | done — chunked, resumable, digest-checked | the engine's own path | local servers in `omad-engine/tests/` |
 | HLS (`.m3u8`) | done — master and media playlists | `packs::run_hls` | a local playlist server, 3 segments → 6000 bytes |
 | FTP / FTPS | done — `PASV`, `SIZE`, `REST` for resume | `packs::run_ftp` | a local FTP server, 300 KB, byte-identical |
-| DASH (`.mpd`) | **partial** — follows the first `<BaseURL>` | `packs::run_dash` | unit test on the parser only |
-| magnet / `.torrent` | done — [librqbit](https://crates.io/crates/librqbit) 9, in process | `packs::run_bt` | magnet accepted, pause during metadata fetch (`omad-engine/tests/bt.rs`) |
-| eD2k | delegated to a local client (`amule`, or `$OMAD_ED2K_CLIENT`) | `packs::delegate_ed2k` | missing-client message; no end-to-end run |
-| YouTube/Bilibili and other site extractors | **not implemented** | falls through to plain HTTP | — |
+| DASH (`.mpd`) | done — best representation, `SegmentTemplate`, `SegmentTimeline`, open-ended until 404 | `packs::run_dash` + `dash.rs` | local MPD server, init + 3 segments, 5200 bytes byte-identical |
+| magnet / `.torrent` | done — [librqbit](https://crates.io/crates/librqbit) 9, in process | `packs::run_bt` | **a real transfer**: one session seeds, another downloads 256 KB by magnet, byte-identical (`tests/bt_transfer.rs`) |
+| eD2k | delegated to a local client (`amule`, or `$OMAD_ED2K_CLIENT`) | `packs::delegate_ed2k` | missing-client message only |
+| YouTube/Bilibili and other site extractors | delegated to `yt-dlp` (or `$OMAD_YTDLP`) | `packs::run_site` | fake extractor writing the output file (`tests/site.rs`) |
 
 ## BitTorrent
 
@@ -45,10 +45,22 @@ eD2k needs `amule` on PATH (install amule, or set OMAD_ED2K_CLIENT): …
 `ed2k` is not registered as a MIME handler for that reason: the handler would exist whether
 or not the client does.
 
-## Why the gap is drawn there
+## Site extractors
 
-Site extractors (YouTube, Bilibili) are not a protocol but a moving target that `yt-dlp`
-maintains; the right integration is a delegation like eD2k's, and it is next.
+YouTube, Bilibili, Vimeo, Twitch and the rest are not protocols but a moving target that
+`yt-dlp` keeps up with, so the page is handed to it: `run_site` runs
+`yt-dlp --no-playlist -f best -o <task file> <url>`, reports progress from the growing file,
+kills the child on pause, and turns a non-zero exit into the last line of its stderr.
+
+The list of hosts is in `packs::SITE_HOSTS`; a lookalike like `youtube.com.evil.example` does
+not match. A normal `https://…/file.iso` still goes to the engine's own HTTP path.
+
+## What is still missing
+
+* **eD2k** is the only protocol here that is delegation without an end-to-end test: this
+  machine has no `amule`, and installing it needs a password.
+* Nothing else: HTTP, HLS, DASH, FTP, BitTorrent and site extraction all have a test that
+  moves bytes.
 
 ## What the code does today
 

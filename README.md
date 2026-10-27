@@ -84,9 +84,9 @@ Resume and Remove per task, and shows a running total at the top. It reads the s
 
 ## Protocols
 
-HTTP/HTTPS (chunked, resumable, digest-checked), HLS, FTP and BitTorrent (via
-[librqbit](https://crates.io/crates/librqbit)) are implemented; DASH is partial; eD2k is
-delegated to a local `amule`; site extractors are not implemented.
+HTTP/HTTPS (chunked, resumable, digest-checked), HLS, DASH, FTP, BitTorrent (via
+[librqbit](https://crates.io/crates/librqbit)) and site extraction (via `yt-dlp`) are
+implemented and tested; eD2k is delegated to a local `amule`.
 [`docs/PROTOCOLS.md`](docs/PROTOCOLS.md) says what is tested against what and why the gap is
 where it is.
 

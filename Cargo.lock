@@ -5138,6 +5138,7 @@ dependencies = [
  "hex 0.4.3",
  "librqbit",
  "omad-core",
+ "quick-xml",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

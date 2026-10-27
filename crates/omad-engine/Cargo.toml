@@ -26,6 +26,9 @@ bytes.workspace = true
 # binary on any of the three platforms. DHT and trackers are on by default, which is what
 # makes a magnet link work at all.
 librqbit = { version = "9", default-features = false, features = ["default-tls"] }
+# A DASH manifest is XML with templates; reading it with a real parser is shorter and
+# safer than scanning for substrings.
+quick-xml = "0.41"
 
 [dev-dependencies]
 tempfile.workspace = true
