@@ -172,14 +172,27 @@ test("a hotlink-protected file without a name in its URL arrives with the server
   }, 20000, "the extension's service worker");
   const workerCdp = await cdp(worker.webSocketDebuggerUrl);
   t.after(() => workerCdp.close());
-  await workerCdp.evaluate(
+  // The hook only exists once the worker's module has been evaluated; asking before that
+  // silently does nothing and the worker keeps dialling the default port.
+  await waitFor(
+    () => workerCdp.evaluate("typeof globalThis.__gfPairForTest === 'function'"),
+    15000,
+    "the worker to expose its pairing hook",
+  );
+  const paired = await workerCdp.evaluate(
     `globalThis.__gfPairForTest("ws://127.0.0.1:${bridgePort}", "")`,
   );
+  assert.equal(paired, true, "the worker accepted the test address");
   await waitFor(
     () => workerCdp.evaluate("Boolean(globalThis.desktopBridgeForTest?.ready)"),
     30000,
     "the extension to connect to the app",
-  );
+  ).catch(async (error) => {
+    const state = await workerCdp.evaluate(
+      "JSON.stringify({ready: globalThis.desktopBridgeForTest?.ready, addr: globalThis.desktopBridgeForTest?.address, err: globalThis.desktopBridgeForTest?.lastError, start: globalThis.__startError ?? null})",
+    );
+    throw new Error(`${error.message}\nworker: ${state}\napp log:\n${appLog.join("")}`);
+  });
 
   const page = await (await fetch(`http://127.0.0.1:${port}/json/new?${origin}/page`, { method: "PUT" })).json();
   const pageCdp = await cdp(page.webSocketDebuggerUrl);

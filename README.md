@@ -82,6 +82,19 @@ The popup lists every task with its status, progress, size and live speed, offer
 Resume and Remove per task, and shows a running total at the top. It reads the same
 `omad tasks --json` the window and the CLI read.
 
+## When the popup says the app is not answering
+
+The popup used to keep saying *Offline* after the app came up: it painted whatever the
+service worker said at the moment it opened, and a worker that connected a moment later had
+no way to tell it. The worker now broadcasts every connection change, the popup asks again
+after opening, and `start()` connects **before** anything that can fail (a badge, a setting)
+so a broken optional step can never make the app look dead. `extension/tests/e2e/popup.test.mjs`
+opens the popup with the app closed, starts the app, and requires the popup to turn
+Connected on its own.
+
+If it still says Offline, the popup now shows the worker's own reason
+(`cannot reach ws://127.0.0.1:14370`, `no answer from …`).
+
 ## When a download fails
 
 Two things make real file hosts refuse a request that a browser would have made, and the

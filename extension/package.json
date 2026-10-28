@@ -6,6 +6,7 @@
   "description": "OmaLLDownloader's Chrome extension: hand downloads to the desktop app",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test tests/"
+    "test": "node --test tests/",
+    "test:e2e": "node --test --test-concurrency=1 tests/e2e/"
   }
 }

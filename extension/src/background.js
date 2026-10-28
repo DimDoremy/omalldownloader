@@ -8,6 +8,7 @@
 
 import { MSG } from "./protocol.js";
 import { desktopBridge, taskState } from "./background-state.js";
+import { DEFAULT_ADDRESS } from "./bridge.js";
 import {
   currentSettings,
   fetchTasks,
@@ -37,17 +38,53 @@ function paintBadge(tasks) {
 }
 
 async function start() {
-  await desktopBridge.load();
-  await loadSettings();
-  await updateBadge();
-  watchSettings();
-  installDownloadInterceptor();
+  // Connect before anything else. A badge, a setting or an interceptor that fails must not
+  // leave the app unreachable: that failure looked exactly like "the desktop is not
+  // answering", which is the one message a user cannot act on.
+  try {
+    await desktopBridge.load();
+  } catch (error) {
+    globalThis.__startError = `load: ${error}`;
+    desktopBridge.address = desktopBridge.address || DEFAULT_ADDRESS;
+  }
+  attachBridgeListeners();
+  desktopBridge.connect();
+  fetchTasks();
+
+  for (const [what, step] of [
+    ["settings", loadSettings],
+    ["badge", updateBadge],
+    ["interceptor", installDownloadInterceptor],
+  ]) {
+    try {
+      await step();
+    } catch (error) {
+      globalThis.__startError = `${what}: ${error}`;
+      console.warn(`omad: ${what} failed`, error);
+    }
+  }
+  try { watchSettings(); } catch (error) { globalThis.__startError = `watch: ${error}`; }
+}
+
+/// The bridge events. Kept apart so `start` can attach them before connecting.
+function attachBridgeListeners() {
 
   desktopBridge.addEventListener("state", (event) => {
-    taskState.connected = event.detail.connected;
-    taskState.paired = event.detail.paired;
-    taskState.address = event.detail.address;
-    if (!event.detail.connected) { fetchTasks(); }
+    const detail = event.detail;
+    taskState.connected = detail.connected;
+    taskState.paired = detail.paired;
+    taskState.address = detail.address;
+    // A popup that opened before the connection was up would otherwise stay on "Offline"
+    // for as long as it is open: this is the message that turns it back.
+    broadcast({
+      type: "state",
+      connected: detail.connected,
+      paired: detail.paired,
+      address: detail.address,
+      reason: detail.reason,
+      tasks: taskState.tasks,
+    });
+    if (!detail.connected) { fetchTasks(); }
   });
   desktopBridge.addEventListener("tasks", (event) => {
     const message = event.detail;
@@ -65,8 +102,6 @@ async function start() {
     }
   });
 
-  desktopBridge.connect();
-  fetchTasks();
 }
 
 start();

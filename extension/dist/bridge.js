@@ -40,11 +40,16 @@ export class DesktopBridge extends EventTarget {
     this.disposed = false;
     /** Why the last connection attempt failed, for the popup to show. */
     this.lastError = "";
+    /** True when someone chose the address on purpose, so it is not treated as stale. */
+    this.explicit = false;
   }
 
   async load() {
     const stored = await chrome.storage.local.get(Object.values(STORAGE_KEYS));
-    this.address = stored[STORAGE_KEYS.address] || DEFAULT_ADDRESS;
+    // An address chosen before loading (a test, or a caller that knows better) wins.
+    this.address = this.explicit
+      ? this.address
+      : (stored[STORAGE_KEYS.address] || DEFAULT_ADDRESS);
     this.secret = stored[STORAGE_KEYS.secret] ?? "";
     this.queue = stored[STORAGE_KEYS.pending] ?? [];
     return this;
@@ -73,6 +78,7 @@ export class DesktopBridge extends EventTarget {
     });
     this.address = normalised;
     this.secret = secret;
+    this.explicit = true;
     return normalised;
   }
 
@@ -92,7 +98,16 @@ export class DesktopBridge extends EventTarget {
   }
 
   connect() {
-    if (this.disposed || this.socket || !this.isPaired) { return; }
+    if (this.disposed) {
+      this.lastError = "the worker is shutting down";
+      return;
+    }
+    if (this.socket) { return; }
+    if (!this.isPaired) {
+      // Never sit silent: say why, and try the fixed address anyway.
+      this.lastError = "no address to connect to";
+      this.address = DEFAULT_ADDRESS;
+    }
     let socket;
     try {
       socket = new WebSocket(this.address);
@@ -137,7 +152,9 @@ export class DesktopBridge extends EventTarget {
     if (this.disposed || !this.isPaired) { return; }
     // A stored address may be stale (an older build used a random port). After a couple
     // of misses, try the fixed one too, so an upgrade needs no manual repair.
-    if (this.attempt >= 2 && this.address !== DEFAULT_ADDRESS) {
+    // Only a *stored* address is presumed stale (an older build used a random port); an
+    // address the user or a test chose explicitly is kept.
+    if (!this.explicit && this.attempt >= 2 && this.address !== DEFAULT_ADDRESS) {
       this.address = DEFAULT_ADDRESS;
       this.attempt = 0;
     }

@@ -58,6 +58,10 @@ port.onMessage.addListener((message) => {
 });
 
 port.postMessage({ type: "state" });
+// The worker may still be dialling; ask again shortly rather than showing a stale Offline.
+for (const delay of [400, 1200, 3000]) {
+  setTimeout(() => port.postMessage({ type: "state" }), delay);
+}
 
 function paintStatus(isConnected, reason) {
   el.status.dataset.state = isConnected ? "connected" : "offline";
