@@ -203,6 +203,11 @@ chrome.runtime.onConnect.addListener((port) => {
 
 // The popup asks for a reconnect after the user changes the port.
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "use-http") {
+    desktopBridge.enterHttpMode("the popup asked for the HTTP transport").catch(() => {});
+    sendResponse({ ok: true });
+    return false;
+  }
   if (message?.type === "reconnect") {
     desktopBridge.close();
     desktopBridge.connect();

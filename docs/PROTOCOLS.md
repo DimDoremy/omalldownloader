@@ -86,3 +86,25 @@ application/vnd.apple.mpegurl, application/dash+xml
 
 `x-scheme-handler/ed2k` and the site handlers stay absent: the first depends on a program
 that may not be installed, and the second does not exist yet.
+
+## When the browser refuses the WebSocket
+
+Some browsers refuse `ws://` on loopback from an extension while allowing `http://` to the
+same port (this machine's Edge does exactly that). The bridge therefore answers two more
+requests on its port:
+
+* `GET /ping` — `{"app":"omalldownloader","version":"1.0.0","protocol":1}`, no origin or
+  secret needed, so the extension can tell "the app is closed" from "this browser will not
+  open a socket";
+* `POST /rpc` — the same commands as the WebSocket (`list`, `add`, `pause`, `resume`,
+  `remove`), with the same Origin check and the same secret in `x-omad-secret`, and the same
+  trust-on-first-use that answers with the secret it issued.
+
+The extension switches to `/rpc` by itself: after 1.5 s without a socket `open` (a blocked
+socket often never fires `error`), when the popup sees `/ping` answer, or when a download
+starts while the bridge looks down. Once switched, it polls the task list every 1.5 s.
+
+Verified on this machine: pointed at a port that accepts TCP and never answers, the bridge
+reaches `mode:"http", ready:true` in about four seconds, and a download from a page is then
+taken by the app instead of the browser
+(`extension/tests/e2e/http-fallback.test.mjs` covers the transport and the task hand-off).

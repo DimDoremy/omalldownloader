@@ -103,9 +103,11 @@ function paintStatus(isConnected, reason) {
     probeApp().then((app) => {
       if (!app || connected) { return; }
       el.reasonHint.textContent =
-        `OmaLLDownloader ${app.version} is running, but this browser will not open the WebSocket. ` +
-        "Reload the extension at edge://extensions; if that does not help, check the extension's errors there.";
+        `OmaLLDownloader ${app.version} is running. Switching to HTTP...`;
       el.reasonHint.hidden = false;
+      // The worker may be stuck on a socket the browser silently never opens; this is the
+      // one place that knows the app answers over HTTP, so it is the one that asks.
+      chrome.runtime.sendMessage({ type: "use-http" }).catch(() => {});
     });
   }
 }

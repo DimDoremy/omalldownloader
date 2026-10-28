@@ -131,10 +131,16 @@ export class DesktopBridge extends EventTarget {
 
     const openTimeout = setTimeout(() => {
       if (!this.ready && this.socket === socket) {
-        this.lastError = `no answer from ${this.address} (is OmaLLDownloader running?)`;
-        socket.close();
+        this.lastError = `the WebSocket to ${this.address} did not open in 1.5s`;
+        // Closing a socket that never opened does not always fire `close` in every browser,
+        // so the fallback is started here rather than from the close handler.
+        this.attempt += 1;
+        try { socket.close(); } catch { /* already gone */ }
+        this.socket = null;
+        this.emitState();
+        void this.enterHttpMode(this.lastError);
       }
-    }, 4000);
+    }, 1500);
     socket.addEventListener("open", () => clearTimeout(openTimeout));
 
     socket.addEventListener("message", (event) => {
@@ -206,7 +212,9 @@ export class DesktopBridge extends EventTarget {
 
   /** The same host and port, over HTTP, for a browser that blocks `ws://` on loopback. */
   httpAddress() {
-    return this.address.replace(/^ws/, "http");
+    // `httpBase` is a test seam: it lets a test point the fallback at a working app while
+    // the WebSocket address is a port that accepts a connection and says nothing.
+    return this.httpBase || this.address.replace(/^ws/, "http");
   }
 
   async httpCall(op, extra = {}) {
@@ -236,6 +244,16 @@ export class DesktopBridge extends EventTarget {
       case MSG.REMOVE: return this.httpCall("remove", { id }).catch(() => {});
       default: return undefined;
     }
+  }
+
+  /**
+   * Asks the app over HTTP whether it is there, and switches to that transport if it is.
+   * Returns true when the bridge is usable, false when the app really is not running.
+   */
+  async tryHttpFallback() {
+    if (this.mode === "http" && this.ready) { return true; }
+    await this.enterHttpMode("the WebSocket is not available");
+    return this.mode === "http" && this.ready;
   }
 
   /** Switches to polling over HTTP, which keeps the extension usable when `ws://` is blocked. */

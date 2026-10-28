@@ -97,6 +97,19 @@ export async function onDeterminingFilename(item, suggest) {
   // The desktop is not there: let the browser do what it would have done, and say so.
   // Cancelling first and failing afterwards would leave the user with nothing.
   if (!desktopBridge.ready) {
+    // The app may be running with a blocked WebSocket. Ask it over HTTP once, and if it
+    // answers, take the download instead of giving it to the browser.
+    if (await desktopBridge.tryHttpFallback()) {
+      try { await chrome.downloads.cancel(item.id); } catch { /* already gone */ }
+      const queued = await desktopBridge.addTask({
+        url: item.url,
+        filename: filename || undefined,
+        referer: item.referrer || undefined,
+      });
+      if (queued.queued) { await offerDesktop(item.url); }
+      suggest({ filename: filename || "omalldownloader-download" });
+      return;
+    }
     suggest();
     await offerDesktop(item.url);
     return;
