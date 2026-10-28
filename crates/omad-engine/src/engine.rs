@@ -472,7 +472,7 @@ impl Engine {
         url: &Url,
         target: &std::path::Path,
         sink: &dyn StoreSink,
-        mut stop: watch::Receiver<bool>,
+        stop: watch::Receiver<bool>,
         probe_error: &crate::http::ProbeError,
     ) -> Result<Outcome, EngineError> {
         use futures_util::StreamExt;
