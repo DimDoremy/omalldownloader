@@ -24,6 +24,9 @@ const STORAGE_KEYS = Object.freeze({
  *  connects with nothing to type. */
 export const DEFAULT_ADDRESS = "ws://127.0.0.1:14370";
 
+/** The name the installed manifest uses; see packaging/native-host.sh. */
+export const NATIVE_HOST = "com.dimdoremy.omalldownloader";
+
 /** Reconnect delays, in milliseconds. */
 const BACKOFF = [500, 1000, 2000, 5000, 10000];
 
@@ -40,8 +43,14 @@ export class DesktopBridge extends EventTarget {
     this.disposed = false;
     /** Why the last connection attempt failed, for the popup to show. */
     this.lastError = "";
-    /** "ws" normally; "http" when the browser refuses a WebSocket but allows fetch. */
+    /**
+     * "native" through the browser's own pipe (works whatever it thinks of loopback),
+     * "ws" normally, "http" when a socket is refused but fetch works.
+     */
     this.mode = "ws";
+    this.native = null;
+    this.nativeQueue = [];
+    this.nativeError = "";
     this.pollTimer = null;
     /** True when someone chose the address on purpose, so it is not treated as stale. */
     this.explicit = false;
@@ -200,6 +209,10 @@ export class DesktopBridge extends EventTarget {
   }
 
   send(message) {
+    if (this.mode === "native") {
+      void this.nativeControl(message);
+      return true;
+    }
     if (this.mode === "http") {
       // Fire and forget from the caller's point of view; failures surface as the next poll.
       void this.httpControl(message);
@@ -208,6 +221,80 @@ export class DesktopBridge extends EventTarget {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) { return false; }
     this.socket.send(JSON.stringify(message));
     return true;
+  }
+
+  /**
+   * The browser's native-messaging pipe: `omalld native-host` on the other end, which
+   * forwards to the running app. This is the transport that no local-network policy can
+   * block, so it is tried first.
+   */
+  async enterNativeMode() {
+    if (this.native) { return true; }
+    let port;
+    try {
+      port = chrome.runtime.connectNative(NATIVE_HOST);
+    } catch (error) {
+      this.nativeError = String(error);
+      return false;
+    }
+    this.native = port;
+    port.onMessage.addListener((message) => {
+      const resolve = this.nativeQueue.shift();
+      if (resolve) { resolve(message); }
+    });
+    port.onDisconnect.addListener(() => {
+      this.nativeError = chrome.runtime.lastError?.message ?? "the native host disconnected";
+      this.native = null;
+      // Nobody is going to answer these; resolving them is what lets the caller move on to
+      // the next transport instead of waiting out the timeout.
+      for (const resolve of this.nativeQueue) { resolve(null); }
+      this.nativeQueue = [];
+      if (this.mode === "native") {
+        this.ready = false;
+        this.lastError = this.nativeError;
+        this.emitState();
+        this.mode = "ws";
+        void this.connect();
+      }
+    });
+
+    const first = await this.nativeCall("list");
+    if (!first || first.error) {
+      this.nativeError = first?.error ?? "no answer from the native host";
+      return false;
+    }
+    this.mode = "native";
+    this.ready = true;
+    this.lastError = "";
+    this.dispatchEvent(new CustomEvent("tasks", {
+      detail: { type: MSG.TASKS, tasks: first.tasks ?? [] },
+    }));
+    this.emitState();
+    clearInterval(this.pollTimer);
+    this.pollTimer = setInterval(async () => {
+      const reply = await this.nativeCall("list");
+      if (reply && !reply.error) {
+        this.dispatchEvent(new CustomEvent("tasks", {
+          detail: { type: MSG.TASKS, tasks: reply.tasks ?? [] },
+        }));
+      }
+    }, 1500);
+    return true;
+  }
+
+  nativeCall(op, extra = {}) {
+    if (!this.native) { return Promise.resolve(null); }
+    return new Promise((resolve) => {
+      this.nativeQueue.push(resolve);
+      // A host that dies mid-request must not leak the caller's promise forever.
+      setTimeout(() => resolve(null), 2500);
+      try {
+        this.native.postMessage({ op, ...extra });
+      } catch (error) {
+        this.nativeError = String(error);
+        resolve(null);
+      }
+    });
   }
 
   /** The same host and port, over HTTP, for a browser that blocks `ws://` on loopback. */
@@ -237,6 +324,16 @@ export class DesktopBridge extends EventTarget {
     return payload;
   }
 
+  async nativeControl(message) {
+    const id = message.id;
+    switch (message.type) {
+      case MSG.PAUSE: return this.nativeCall("pause", { id });
+      case MSG.RESUME: return this.nativeCall("resume", { id });
+      case MSG.REMOVE: return this.nativeCall("remove", { id });
+      default: return undefined;
+    }
+  }
+
   async httpControl(message) {
     const id = message.id;
     switch (message.type) {
@@ -251,6 +348,12 @@ export class DesktopBridge extends EventTarget {
    * Asks the app over HTTP whether it is there, and switches to that transport if it is.
    * Returns true when the bridge is usable, false when the app really is not running.
    */
+  /** Native first: it is the only transport a browser cannot refuse. */
+  async tryNative() {
+    if (await this.enterNativeMode()) { return true; }
+    return false;
+  }
+
   async tryHttpFallback() {
     if (this.mode === "http" && this.ready) { return true; }
     await this.enterHttpMode("the WebSocket is not available");
@@ -359,6 +462,12 @@ export class DesktopBridge extends EventTarget {
    * @param {{url: string, filename?: string, referer?: string}} task
    */
   async addTask(task) {
+    if (this.mode === "native" && this.ready) {
+      const reply = await this.nativeCall("add", task);
+      if (reply && !reply.error) { return { queued: false }; }
+      this.lastError = `the task was refused: ${reply?.error ?? "no answer"}`;
+      return { queued: false };
+    }
     if (this.mode === "http" && this.ready) {
       try {
         await this.httpCall("add", task);

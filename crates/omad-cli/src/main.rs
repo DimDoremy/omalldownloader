@@ -36,6 +36,16 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Speak the browser's native-messaging protocol on stdin/stdout.
+    ///
+    /// The extension uses this when a browser refuses its loopback HTTP/WebSocket requests
+    /// (Edge does). It is a proxy to the running app's bridge, so the app owns the tasks and
+    /// this process only carries bytes between the browser and it.
+    NativeHost {
+        /// The bridge port to forward to.
+        #[arg(long, default_value_t = 14370)]
+        port: u16,
+    },
     /// What a URL is: size, name, whether ranges work. Downloads nothing.
     Probe {
         url: String,
@@ -150,6 +160,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             }
         }
 
+        Command::NativeHost { port } => return native_host(port),
         Command::Add {
             url,
             name,
@@ -535,5 +546,66 @@ mod tests {
         assert_eq!(human_bytes(512), "512 B");
         assert_eq!(human_bytes(1024), "1.0 KB");
         assert_eq!(human_bytes(3 * 1024 * 1024), "3.0 MB");
+    }
+}
+
+/// The native-messaging loop: length-prefixed JSON in, length-prefixed JSON out.
+///
+/// Each request becomes a `POST /rpc` to the running app, so this process holds no state
+/// and the app remains the only writer of the task list.
+fn native_host(port: u16) -> anyhow::Result<()> {
+    use std::io::{Read, Write};
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+    let endpoint = format!("http://127.0.0.1:{port}/rpc");
+    let origin = "chrome-extension://omalldownloader-native";
+    let mut secret = String::new();
+
+    let stdin = std::io::stdin();
+    let mut input = stdin.lock();
+    let stdout = std::io::stdout();
+    let mut output = stdout.lock();
+
+    loop {
+        let mut length = [0u8; 4];
+        match input.read_exact(&mut length) {
+            Ok(()) => {}
+            // The browser closed the pipe: that is how this mode ends.
+            Err(_) => return Ok(()),
+        }
+        let length = u32::from_le_bytes(length) as usize;
+        if length == 0 || length > 8 * 1024 * 1024 {
+            return Ok(());
+        }
+        let mut body = vec![0u8; length];
+        input.read_exact(&mut body)?;
+
+        let mut request: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+        if !secret.is_empty() {
+            request["secret"] = serde_json::Value::String(secret.clone());
+        }
+
+        let reply = match client
+            .post(&endpoint)
+            .header("Origin", origin)
+            .header("Content-Type", "text/plain;charset=UTF-8")
+            .body(request.to_string())
+            .send()
+        {
+            Ok(response) => response.text().unwrap_or_else(|_| "{}".into()),
+            Err(error) => format!(r#"{{"error":"the app is not reachable: {error}"}}"#),
+        };
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&reply)
+            && let Some(issued) = value.get("secret").and_then(|v| v.as_str())
+        {
+            secret = issued.to_string();
+        }
+
+        let bytes = reply.as_bytes();
+        output.write_all(&(bytes.len() as u32).to_le_bytes())?;
+        output.write_all(bytes)?;
+        output.flush()?;
     }
 }

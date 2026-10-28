@@ -21,3 +21,5 @@ anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
+# The native-messaging mode is a blocking pipe, so it uses the blocking client.
+reqwest = { workspace = true, features = ["blocking"] }

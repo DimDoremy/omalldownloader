@@ -48,7 +48,11 @@ async function start() {
     desktopBridge.address = desktopBridge.address || DEFAULT_ADDRESS;
   }
   attachBridgeListeners();
-  desktopBridge.connect();
+  // The native pipe cannot be refused by local-network policy, so it is tried first; the
+  // socket and the HTTP fallback remain for browsers that have no host installed.
+  if (!(await desktopBridge.tryNative())) {
+    desktopBridge.connect();
+  }
   fetchTasks();
 
   for (const [what, step] of [

@@ -108,3 +108,21 @@ Verified on this machine: pointed at a port that accepts TCP and never answers, 
 reaches `mode:"http", ready:true` in about four seconds, and a download from a page is then
 taken by the app instead of the browser
 (`extension/tests/e2e/http-fallback.test.mjs` covers the transport and the task hand-off).
+
+## Native messaging (the transport that always works)
+
+Edge on this machine refuses loopback `POST` from an extension outright — `GET /ping`
+succeeds, `POST /rpc` does not, whatever the CORS headers say — and the popup therefore sat
+on "Switching to HTTP..." forever. The answer is not another network transport but the
+browser's own pipe:
+
+* `packaging/native-host.sh` is the host program; `omalld native-host --port 14370` speaks
+  the native-messaging framing (little-endian length + JSON) on stdin/stdout and forwards
+  each request to the running app's `/rpc`, keeping the secret it was issued.
+* `packaging/install-omarchy.sh` installs the host manifest into every browser's
+  `NativeMessagingHosts` directory, with `allowed_origins` naming the extension id.
+* the extension tries `chrome.runtime.connectNative` **before** WebSocket or HTTP, and falls
+  back within 2.5 s when no host is installed.
+
+Nothing about the app's security model changes: the native host is a local proxy to the same
+Origin-checked, secret-checked endpoint.

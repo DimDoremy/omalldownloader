@@ -10,7 +10,8 @@
     "contextMenus",
     "notifications",
     "scripting",
-    "activeTab"
+    "activeTab",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "<all_urls>"

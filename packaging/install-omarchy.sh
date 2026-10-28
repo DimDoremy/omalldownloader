@@ -92,6 +92,28 @@ done
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$applications" || true
 command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t -f "$data_dir/icons/hicolor" >/dev/null 2>&1 || true
 
+# Native messaging: the transport a browser can always reach, whatever it thinks of
+# loopback HTTP. The manifest names the extension ids allowed to use it.
+echo "==> native messaging host"
+install -m 0755 "$here/native-host.sh" "$bin_dir/omalld-native-host"
+for browser_dir in \
+  "$HOME/.config/microsoft-edge/NativeMessagingHosts" \
+  "$HOME/.config/microsoft-edge-dev/NativeMessagingHosts" \
+  "$HOME/.config/google-chrome/NativeMessagingHosts" \
+  "$HOME/.config/chromium/NativeMessagingHosts"; do
+  parent=$(dirname "$browser_dir")
+  [ -d "$parent" ] || continue
+  install -d "$browser_dir"
+  printf '%s\n' "{
+  \"name\": \"com.dimdoremy.omalldownloader\",
+  \"description\": \"OmaLLDownloader bridge\",
+  \"path\": \"$bin_dir/omalld-native-host\",
+  \"type\": \"stdio\",
+  \"allowed_origins\": [\"chrome-extension://iphlaibgoabcbaepfakbjefffeipgoni/\"]
+}" > "$browser_dir/com.dimdoremy.omalldownloader.json"
+  echo "    $browser_dir/com.dimdoremy.omalldownloader.json"
+done
+
 echo "==> bar widget into $plugins"
 install -d "$plugins"
 install -m 0644 "$here/omarchy/bar-plugin/manifest.json" "$plugins/manifest.json"
