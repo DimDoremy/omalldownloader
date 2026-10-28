@@ -307,9 +307,14 @@ impl Engine {
         let probe_source = crate::http::HttpProbe::with_client(self.client.clone());
         let outcome = match probe_source.probe(&url, &self.config.policy).await {
             Ok(outcome) => outcome,
-            Err(e) => {
-                sink.on_failed(id, &e.to_string(), false);
-                return Err(EngineError::Probe(e));
+            // A host can refuse every question the probe asks and still serve the file to a
+            // plain GET. Trying that is the difference between "this downloads" and "this
+            // reports 400", so a failed probe falls through to a single stream instead of
+            // ending the task.
+            Err(error) => {
+                return self
+                    .stream_to_file(id, &url, &target, sink.as_ref(), stop.clone(), &error)
+                    .await;
             }
         };
         let probe = outcome.probe;
@@ -457,6 +462,95 @@ impl Engine {
 
     /// Chooses the plan: the old one when the server's file is provably the same,
     /// otherwise a fresh split.
+    /// The last resort: one GET, no ranges, no questions asked first.
+    ///
+    /// This is what a browser does, and it is what makes a signed CDN link work when HEAD
+    /// and ranged requests are refused. Progress comes from the bytes written.
+    async fn stream_to_file(
+        &self,
+        id: TaskId,
+        url: &Url,
+        target: &std::path::Path,
+        sink: &dyn StoreSink,
+        mut stop: watch::Receiver<bool>,
+        probe_error: &crate::http::ProbeError,
+    ) -> Result<Outcome, EngineError> {
+        use futures_util::StreamExt;
+        use std::io::Write;
+
+        if self.config.policy.check_url(url) != omad_core::ssrf::Verdict::Allowed {
+            let message = format!("the address is not one we may fetch: {url}");
+            sink.on_failed(id, &message, false);
+            return Err(EngineError::Transport(message));
+        }
+
+        let mut request = self.client.get(url.as_str());
+        if let Some(agent) = &self.config.user_agent {
+            request = request.header(reqwest::header::USER_AGENT, agent);
+        }
+        let response = match request.send().await {
+            Ok(response) => response,
+            Err(error) => {
+                let message = format!("{probe_error}; the plain download failed too: {error}");
+                sink.on_failed(id, &message, true);
+                return Err(EngineError::Transport(message));
+            }
+        };
+        if !response.status().is_success() {
+            let message = format!(
+                "{probe_error}; a plain GET was answered {}",
+                response.status().as_u16()
+            );
+            sink.on_failed(id, &message, false);
+            return Err(EngineError::Transport(message));
+        }
+
+        let total = response.content_length();
+        let mut file = std::fs::File::create(target).map_err(|e| EngineError::Io {
+            path: target.to_path_buf(),
+            source: e,
+        })?;
+        let mut stream = response.bytes_stream();
+        let mut written = 0u64;
+        let started = std::time::Instant::now();
+        while let Some(chunk) = stream.next().await {
+            if *stop.borrow() {
+                sink.on_finished(id, Outcome::Paused, written, total);
+                return Ok(Outcome::Paused);
+            }
+            let chunk = chunk.map_err(|e| EngineError::Transport(e.to_string()))?;
+            file.write_all(&chunk).map_err(|e| EngineError::Io {
+                path: target.to_path_buf(),
+                source: e,
+            })?;
+            written += chunk.len() as u64;
+            let elapsed = started.elapsed().as_secs_f64().max(0.001);
+            sink.on_progress(
+                id,
+                &Progress {
+                    received: written,
+                    total,
+                    speed: (written as f64 / elapsed) as u64,
+                },
+            );
+            sink.on_commit(id, written, total, (written as f64 / elapsed) as u64);
+        }
+        file.flush().map_err(|e| EngineError::Io {
+            path: target.to_path_buf(),
+            source: e,
+        })?;
+        if let Some(total) = total
+            && written != total
+        {
+            return Err(EngineError::Short {
+                written,
+                expected: total,
+            });
+        }
+        sink.on_finished(id, Outcome::Completed, written, total);
+        Ok(Outcome::Completed)
+    }
+
     fn plan_for(
         &self,
         probe: &Probe,

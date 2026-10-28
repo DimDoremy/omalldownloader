@@ -95,19 +95,28 @@ impl ProbeSource for HttpProbe {
                 .await
                 .map_err(|e| ProbeError::Transport(e.to_string()))?;
 
-            // A server may refuse HEAD — 405 and 501 say so, and plenty of file hosts
-            // answer 403 to *any* HEAD while serving GET happily. An empty ranged GET is
-            // the next best question, and it is the one a browser asks.
-            let response = if !response.status().is_success() {
-                self.client
+            // A server may refuse HEAD — 405 and 501 say so, plenty of file hosts answer
+            // 403 to *any* HEAD, and signed CDN links answer 400 to a ranged request while
+            // serving a plain GET. Each step is a weaker question than the last, and the
+            // last one is exactly what a browser sends.
+            let mut response = response;
+            if !response.status().is_success() {
+                response = self
+                    .client
                     .get(current.as_str())
                     .header(reqwest::header::RANGE, "bytes=0-0")
                     .send()
                     .await
-                    .map_err(|e| ProbeError::Transport(e.to_string()))?
-            } else {
-                response
-            };
+                    .map_err(|e| ProbeError::Transport(e.to_string()))?;
+            }
+            if !response.status().is_success() {
+                response = self
+                    .client
+                    .get(current.as_str())
+                    .send()
+                    .await
+                    .map_err(|e| ProbeError::Transport(e.to_string()))?;
+            }
 
             let status = response.status();
 
