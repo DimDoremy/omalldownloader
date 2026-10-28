@@ -280,6 +280,21 @@ async fn answer_ping(stream: &mut tokio::net::TcpStream, body: &str) -> std::io:
 /// It exists because a browser can block `ws://` on loopback while allowing `http://`, and
 /// a download manager that only speaks one of them is a download manager that does not
 /// work. Push updates become polling here; the extension polls while it is in this mode.
+/// The preflight answer. A browser sends `OPTIONS` before a POST that carries a
+/// `Content-Type` it does not consider simple; without this reply the request never
+/// happens at all, and the popup reads that as "the app is not answering".
+async fn answer_preflight(stream: &mut tokio::net::TcpStream) -> std::io::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let reply = "HTTP/1.1 204 No Content\r\n\
+                 Access-Control-Allow-Origin: *\r\n\
+                 Access-Control-Allow-Methods: POST, GET, OPTIONS\r\n\
+                 Access-Control-Allow-Headers: content-type, x-omad-secret\r\n\
+                 Access-Control-Max-Age: 600\r\n\
+                 Content-Length: 0\r\nConnection: close\r\n\r\n";
+    stream.write_all(reply.as_bytes()).await?;
+    stream.flush().await
+}
+
 async fn answer_rpc(
     stream: &mut tokio::net::TcpStream,
     shared: &Arc<Shared>,
@@ -320,7 +335,9 @@ async fn answer_rpc(
             let reply = format!(
                 "HTTP/1.1 {status}\r\nContent-Type: application/json\r\n\
                  Content-Length: {}\r\nCache-Control: no-store\r\n\
-                 Access-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{}",
+                 Access-Control-Allow-Origin: *\r\n\
+                 Access-Control-Allow-Headers: content-type, x-omad-secret\r\n\
+                 Connection: close\r\n\r\n{}",
                 payload.len(),
                 payload
             );
@@ -366,8 +383,18 @@ async fn http_rpc(
         ));
     }
 
-    // The same trust-on-first-use rule as the WebSocket: no secret means "give me one".
-    let presented = header("x-omad-secret").unwrap_or_default();
+    // The secret may be in the body: a request with no custom header and a `text/plain`
+    // body is "simple", so no preflight is needed and no local-network policy objects.
+    let body_json: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+    let presented = header("x-omad-secret")
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            body_json
+                .get("secret")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_default();
     let known = shared.secrets.lock().await.get(&origin).cloned();
     let mut issued = None;
     if !presented.is_empty() {
@@ -388,8 +415,10 @@ async fn http_rpc(
         return Err(("401 Unauthorized", "this origin is not paired".into()));
     }
 
-    let request: serde_json::Value = serde_json::from_str(body)
-        .map_err(|e| ("400 Bad Request", format!("unreadable request: {e}")))?;
+    let request = body_json;
+    if request.get("op").is_none() {
+        return Err(("400 Bad Request", "unreadable request".into()));
+    }
     let op = request
         .get("op")
         .and_then(|v| v.as_str())
@@ -465,6 +494,10 @@ async fn serve(
         } else {
             String::new()
         };
+        if start.starts_with("OPTIONS ") {
+            let _ = answer_preflight(&mut stream).await;
+            return Ok(());
+        }
         if start.starts_with("POST /rpc") {
             let _ = answer_rpc(&mut stream, &shared, addr).await;
             return Ok(());

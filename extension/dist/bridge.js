@@ -218,12 +218,13 @@ export class DesktopBridge extends EventTarget {
   }
 
   async httpCall(op, extra = {}) {
-    const headers = { "Content-Type": "application/json" };
-    if (this.secret) { headers["x-omad-secret"] = this.secret; }
+    // A "simple" request on purpose: `text/plain` and the secret in the body mean no CORS
+    // preflight and no custom headers, which is what lets this reach the app from a browser
+    // that blocks a JSON POST to loopback.
     const response = await fetch(`${this.httpAddress()}/rpc`, {
       method: "POST",
-      headers,
-      body: JSON.stringify({ op, ...extra }),
+      headers: { "Content-Type": "text/plain;charset=UTF-8" },
+      body: JSON.stringify({ op, secret: this.secret || undefined, ...extra }),
       cache: "no-store",
       signal: AbortSignal.timeout(8000),
     });
