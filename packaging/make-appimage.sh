@@ -32,6 +32,12 @@ mkdir -p "$appdir/usr/bin" \
 install -m 0755 "$root/target/release/omalldownloader" "$appdir/usr/bin/"
 install -m 0755 "$root/target/release/omalld" "$appdir/usr/bin/"
 install -m 0644 "$root/packaging/omad.desktop" "$appdir/usr/share/applications/omalldownloader.desktop"
+
+# The extension ships inside the image, so a user who has only the AppImage can still load
+# it: `--appimage-extract` and point "Load unpacked" at usr/share/omalldownloader/extension.
+(cd "$root" && node extension/scripts/build.mjs >/dev/null)
+mkdir -p "$appdir/usr/share/omalldownloader/extension"
+cp -r "$root/extension/dist/." "$appdir/usr/share/omalldownloader/extension/"
 install -m 0644 "$root/packaging/icons/omalldownloader-256.png" \
   "$appdir/usr/share/icons/hicolor/256x256/apps/omalldownloader.png"
 
