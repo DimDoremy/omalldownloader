@@ -93,7 +93,17 @@ opens the popup with the app closed, starts the app, and requires the popup to t
 Connected on its own.
 
 If it still says Offline, the popup now shows the worker's own reason
-(`cannot reach ws://127.0.0.1:14370`, `no answer from …`).
+(`cannot reach ws://127.0.0.1:14370`, `the browser refused the connection …`).
+
+### When the browser blocks WebSockets
+
+A browser can refuse `ws://` on loopback while allowing `http://` to the same port. The
+extension therefore has a second transport: `POST /rpc` on the same port, with the same
+origin check and the same secret, polling for task updates instead of receiving pushes. It
+switches automatically after two failed sockets, and only when `GET /ping` answers — so
+"the app is closed" still reads as *closed* instead of as a transport problem.
+
+`omalld` never needs it; it talks to the store directly.
 
 ## When a download fails
 

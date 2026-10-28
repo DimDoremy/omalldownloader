@@ -12,6 +12,7 @@ const el = {
   status: document.getElementById("status"),
   offline: document.getElementById("offline"),
   reason: document.getElementById("reason"),
+  reasonHint: document.getElementById("reason-hint"),
   address: document.getElementById("address"),
   reconnect: document.getElementById("reconnect"),
   openApp: document.getElementById("open-app"),
@@ -63,12 +64,50 @@ for (const delay of [400, 1200, 3000]) {
   setTimeout(() => port.postMessage({ type: "state" }), delay);
 }
 
+/**
+ * Asks the app whether it is up, over plain HTTP.
+ *
+ * The WebSocket can be refused by the browser itself, and then the popup cannot tell
+ * "the app is closed" from "this browser will not connect". `/ping` answers that.
+ */
+async function probeApp() {
+  try {
+    const reply = await fetch(DEFAULT_ADDRESS.replace("ws://", "http://") + "/ping", {
+      cache: "no-store",
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!reply.ok) { return null; }
+    return await reply.json();
+  } catch {
+    return null;
+  }
+}
+
 function paintStatus(isConnected, reason) {
   el.status.dataset.state = isConnected ? "connected" : "offline";
   el.status.textContent = isConnected ? "Connected" : "Offline";
   el.offline.hidden = isConnected;
   el.connected.hidden = !isConnected;
   el.reason.textContent = isConnected ? "" : (reason || "The desktop app is not answering.");
+  // A blocked socket and a sleeping worker need different things from the user, so say
+  // which one this looks like instead of leaving the same sentence for both.
+  const hint = !isConnected && /refused|SecurityError|blocked/i.test(reason || "")
+    ? "The browser blocked the connection. Reload the extension at edge://extensions; if it stays blocked, allow local network access for the extension."
+    : !isConnected && /no answer/i.test(reason || "")
+      ? "Nothing is listening. Start OmaLLDownloader; this page reconnects by itself."
+      : "";
+  el.reasonHint.textContent = hint;
+  el.reasonHint.hidden = hint === "";
+  if (!isConnected) {
+    // Once the answer arrives, say which of the two it is.
+    probeApp().then((app) => {
+      if (!app || connected) { return; }
+      el.reasonHint.textContent =
+        `OmaLLDownloader ${app.version} is running, but this browser will not open the WebSocket. ` +
+        "Reload the extension at edge://extensions; if that does not help, check the extension's errors there.";
+      el.reasonHint.hidden = false;
+    });
+  }
 }
 
 function paintSettings(settings) {

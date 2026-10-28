@@ -40,6 +40,9 @@ export class DesktopBridge extends EventTarget {
     this.disposed = false;
     /** Why the last connection attempt failed, for the popup to show. */
     this.lastError = "";
+    /** "ws" normally; "http" when the browser refuses a WebSocket but allows fetch. */
+    this.mode = "ws";
+    this.pollTimer = null;
     /** True when someone chose the address on purpose, so it is not treated as stale. */
     this.explicit = false;
   }
@@ -111,7 +114,16 @@ export class DesktopBridge extends EventTarget {
     let socket;
     try {
       socket = new WebSocket(this.address);
-    } catch {
+    } catch (error) {
+      // A blocked WebSocket (a CSP rule, or the browser's local-network policy) throws
+      // here and never reaches `error`/`close`, so it has to be recorded or the popup has
+      // nothing to say.
+      this.lastError = `the browser refused the connection to ${this.address}: ${error}`;
+      // One retry through the other loopback spelling: a policy that names 127.0.0.1 does
+      // not always name localhost.
+      if (this.address.includes("127.0.0.1")) {
+        this.address = this.address.replace("127.0.0.1", "localhost");
+      }
       this.scheduleReconnect();
       return;
     }
@@ -119,7 +131,7 @@ export class DesktopBridge extends EventTarget {
 
     const openTimeout = setTimeout(() => {
       if (!this.ready && this.socket === socket) {
-        this.lastError = `no answer from ${this.address}`;
+        this.lastError = `no answer from ${this.address} (is OmaLLDownloader running?)`;
         socket.close();
       }
     }, 4000);
@@ -152,6 +164,12 @@ export class DesktopBridge extends EventTarget {
     if (this.disposed || !this.isPaired) { return; }
     // A stored address may be stale (an older build used a random port). After a couple
     // of misses, try the fixed one too, so an upgrade needs no manual repair.
+    // Two failed sockets is enough evidence that this browser will not open one; the HTTP
+    // fallback uses the same port and the same secret.
+    if (this.attempt >= 2) {
+      void this.enterHttpMode(this.lastError || "the WebSocket would not connect");
+      return;
+    }
     // Only a *stored* address is presumed stale (an older build used a random port); an
     // address the user or a test chose explicitly is kept.
     if (!this.explicit && this.attempt >= 2 && this.address !== DEFAULT_ADDRESS) {
@@ -176,9 +194,90 @@ export class DesktopBridge extends EventTarget {
   }
 
   send(message) {
+    if (this.mode === "http") {
+      // Fire and forget from the caller's point of view; failures surface as the next poll.
+      void this.httpControl(message);
+      return true;
+    }
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) { return false; }
     this.socket.send(JSON.stringify(message));
     return true;
+  }
+
+  /** The same host and port, over HTTP, for a browser that blocks `ws://` on loopback. */
+  httpAddress() {
+    return this.address.replace(/^ws/, "http");
+  }
+
+  async httpCall(op, extra = {}) {
+    const headers = { "Content-Type": "application/json" };
+    if (this.secret) { headers["x-omad-secret"] = this.secret; }
+    const response = await fetch(`${this.httpAddress()}/rpc`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ op, ...extra }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (payload.secret) {
+      this.secret = payload.secret;
+      await chrome.storage.local.set({ [STORAGE_KEYS.secret]: payload.secret });
+    }
+    if (!response.ok) { throw new Error(payload.error ?? `HTTP ${response.status}`); }
+    return payload;
+  }
+
+  async httpControl(message) {
+    const id = message.id;
+    switch (message.type) {
+      case MSG.PAUSE: return this.httpCall("pause", { id }).catch(() => {});
+      case MSG.RESUME: return this.httpCall("resume", { id }).catch(() => {});
+      case MSG.REMOVE: return this.httpCall("remove", { id }).catch(() => {});
+      default: return undefined;
+    }
+  }
+
+  /** Switches to polling over HTTP, which keeps the extension usable when `ws://` is blocked. */
+  async enterHttpMode(reason) {
+    if (this.mode === "http") { return; }
+    this.close();
+    this.mode = "http";
+    try {
+      // Only take this route when the app is actually there: otherwise "app closed" would
+      // look like a transport problem and the popup would say the wrong thing.
+      const ping = await fetch(`${this.httpAddress()}/ping`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!ping.ok) { throw new Error(`ping answered ${ping.status}`); }
+      const first = await this.httpCall("list");
+      this.ready = true;
+      this.lastError = "";
+      this.dispatchEvent(new CustomEvent("tasks", { detail: { type: MSG.TASKS, tasks: first.tasks ?? [] } }));
+      this.emitState();
+    } catch (error) {
+      this.ready = false;
+      this.lastError = `${reason}; the HTTP fallback failed too: ${error}`;
+      this.emitState();
+      this.mode = "ws";
+      this.scheduleReconnect();
+      return;
+    }
+    clearInterval(this.pollTimer);
+    this.pollTimer = setInterval(async () => {
+      try {
+        const reply = await this.httpCall("list");
+        this.dispatchEvent(new CustomEvent("tasks", { detail: { type: MSG.TASKS, tasks: reply.tasks ?? [] } }));
+      } catch (error) {
+        this.ready = false;
+        this.lastError = `the HTTP fallback stopped: ${error}`;
+        this.emitState();
+        clearInterval(this.pollTimer);
+        this.mode = "ws";
+        this.scheduleReconnect();
+      }
+    }, 1500);
   }
 
   /** @param {any} message */
@@ -241,6 +340,15 @@ export class DesktopBridge extends EventTarget {
    * @param {{url: string, filename?: string, referer?: string}} task
    */
   async addTask(task) {
+    if (this.mode === "http" && this.ready) {
+      try {
+        await this.httpCall("add", task);
+        return { queued: false };
+      } catch (error) {
+        this.lastError = `the task was refused: ${error}`;
+        return { queued: false };
+      }
+    }
     if (this.ready && this.send({ type: MSG.ADD_TASK, ...task })) { return { queued: false }; }
     this.queue.push(task);
     await chrome.storage.local.set({ [STORAGE_KEYS.pending]: this.queue });

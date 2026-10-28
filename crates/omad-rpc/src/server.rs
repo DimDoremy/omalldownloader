@@ -258,16 +258,233 @@ fn refuse(status: StatusCode) -> ErrorResponse {
 /// The error type `accept_hdr_async` requires. Its size is fixed by that API, not by us.
 type HandshakeResult = Result<Response, ErrorResponse>;
 
+/// Answers `GET /ping` with a line of JSON and closes.
+///
+/// The extension needs to tell "the app is not running" apart from "the browser refused the
+/// WebSocket": the first is fixed by starting the app, the second by fixing the extension.
+/// A plain HTTP request on the same port answers that, and nothing else lives here.
+async fn answer_ping(stream: &mut tokio::net::TcpStream, body: &str) -> std::io::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+         Cache-Control: no-store\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream.write_all(response.as_bytes()).await?;
+    stream.flush().await
+}
+
+/// The HTTP fallback: the same commands as the WebSocket, for a browser that refuses one.
+///
+/// It exists because a browser can block `ws://` on loopback while allowing `http://`, and
+/// a download manager that only speaks one of them is a download manager that does not
+/// work. Push updates become polling here; the extension polls while it is in this mode.
+async fn answer_rpc(
+    stream: &mut tokio::net::TcpStream,
+    shared: &Arc<Shared>,
+    addr: SocketAddr,
+) -> std::io::Result<()> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 4096];
+    // Read the head, then exactly as much body as `Content-Length` promises.
+    loop {
+        if let Some(end) = find_head_end(&buffer) {
+            let head = String::from_utf8_lossy(&buffer[..end]).to_string();
+            let length = head
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                })
+                .unwrap_or(0)
+                .min(1024 * 1024);
+            let body_start = end + 4;
+            while buffer.len() < body_start + length {
+                let read = stream.read(&mut chunk).await?;
+                if read == 0 {
+                    break;
+                }
+                buffer.extend_from_slice(&chunk[..read]);
+            }
+            let body = String::from_utf8_lossy(&buffer[body_start..]).to_string();
+            let response = http_rpc(&head, &body, shared, addr).await;
+            let (status, payload) = match response {
+                Ok(payload) => ("200 OK", payload),
+                Err((code, message)) => (code, format!(r#"{{"error":"{message}"}}"#)),
+            };
+            let reply = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\n\
+                 Content-Length: {}\r\nCache-Control: no-store\r\n\
+                 Access-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n{}",
+                payload.len(),
+                payload
+            );
+            stream.write_all(reply.as_bytes()).await?;
+            return stream.flush().await;
+        }
+        let read = stream.read(&mut chunk).await?;
+        if read == 0 || buffer.len() > 1024 * 1024 {
+            return Ok(());
+        }
+        buffer.extend_from_slice(&chunk[..read]);
+    }
+}
+
+fn find_head_end(buffer: &[u8]) -> Option<usize> {
+    buffer.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+/// The HTTP side of the bridge: origin check, secret check, one command, one answer.
+async fn http_rpc(
+    head: &str,
+    body: &str,
+    shared: &Arc<Shared>,
+    addr: SocketAddr,
+) -> Result<String, (&'static str, String)> {
+    let header = |name: &str| {
+        head.lines().skip(1).find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.eq_ignore_ascii_case(name)
+                .then(|| value.trim().to_string())
+        })
+    };
+
+    let host = header("host").unwrap_or_default();
+    if !host_is_loopback(&host, addr) {
+        return Err(("403 Forbidden", "the Host header is not loopback".into()));
+    }
+    let origin = header("origin").unwrap_or_default();
+    if !origin_is_extension_like(&origin) {
+        return Err((
+            "403 Forbidden",
+            "only a browser extension may connect".into(),
+        ));
+    }
+
+    // The same trust-on-first-use rule as the WebSocket: no secret means "give me one".
+    let presented = header("x-omad-secret").unwrap_or_default();
+    let known = shared.secrets.lock().await.get(&origin).cloned();
+    let mut issued = None;
+    if !presented.is_empty() {
+        match &known {
+            Some(secret) if constant_time_eq(secret.as_bytes(), presented.as_bytes()) => {}
+            _ => return Err(("401 Unauthorized", "the secret does not match".into())),
+        }
+    } else if shared.config.trust_first_origin {
+        let secret = random_token(32);
+        shared
+            .secrets
+            .lock()
+            .await
+            .insert(origin.clone(), secret.clone());
+        shared.host.remember_origin(&origin, &secret);
+        issued = Some(secret);
+    } else {
+        return Err(("401 Unauthorized", "this origin is not paired".into()));
+    }
+
+    let request: serde_json::Value = serde_json::from_str(body)
+        .map_err(|e| ("400 Bad Request", format!("unreadable request: {e}")))?;
+    let op = request
+        .get("op")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+
+    let payload = match op {
+        "list" => {
+            let tasks = shared.host.list(&origin);
+            serde_json::json!({ "tasks": tasks })
+        }
+        "add" => {
+            let url = request
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            if url.is_empty() {
+                return Err(("400 Bad Request", "a task needs a url".into()));
+            }
+            let mut task = omad_core::AddTask::new(url);
+            task.filename = request
+                .get("filename")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            task.referer = request
+                .get("referer")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            match shared.host.add(&origin, task) {
+                Ok(view) => serde_json::json!({ "task": view }),
+                Err(error) => return Err(("400 Bad Request", error)),
+            }
+        }
+        "pause" | "resume" | "remove" => {
+            let id = request
+                .get("id")
+                .and_then(|v| v.as_u64())
+                .map(omad_core::TaskId)
+                .ok_or(("400 Bad Request", "a command needs an id".to_string()))?;
+            let result = match op {
+                "pause" => shared.host.pause(&origin, id),
+                "resume" => shared.host.resume(&origin, id),
+                _ => shared.host.remove(&origin, id),
+            };
+            match result {
+                Ok(()) => serde_json::json!({ "ok": true }),
+                Err(error) => return Err(("400 Bad Request", error)),
+            }
+        }
+        other => {
+            return Err(("400 Bad Request", format!("unknown op {other:?}")));
+        }
+    };
+
+    let mut payload = payload;
+    if let Some(secret) = issued {
+        payload["secret"] = serde_json::Value::String(secret);
+    }
+    Ok(payload.to_string())
+}
+
 async fn serve(
-    stream: tokio::net::TcpStream,
+    mut stream: tokio::net::TcpStream,
     peer: SocketAddr,
     shared: Arc<Shared>,
 ) -> anyhow::Result<()> {
+    let addr = stream.local_addr()?;
+    // `/ping` and `/rpc` before the WebSocket handshake: one asks whether the app is up,
+    // the other is the transport for a browser that refuses to open a WebSocket.
+    {
+        let mut head = [0u8; 128];
+        let start = if let Ok(n) = stream.peek(&mut head).await {
+            String::from_utf8_lossy(&head[..n]).to_string()
+        } else {
+            String::new()
+        };
+        if start.starts_with("POST /rpc") {
+            let _ = answer_rpc(&mut stream, &shared, addr).await;
+            return Ok(());
+        }
+        if let Ok(n) = stream.peek(&mut head).await
+            && n > 0
+            && String::from_utf8_lossy(&head[..n]).starts_with("GET /ping")
+        {
+            let body = format!(
+                r#"{{"app":"omalldownloader","version":"{}","protocol":{}}}"#,
+                shared.config.server_version, PROTOCOL_MAJOR
+            );
+            let _ = answer_ping(&mut stream, &body).await;
+            return Ok(());
+        }
+    }
     // The callback runs during the handshake, so this is how the validated origin
     // reaches the session that follows.
     let captured: Arc<std::sync::Mutex<Option<String>>> = Arc::new(std::sync::Mutex::new(None));
     let capture = captured.clone();
-    let addr = stream.local_addr()?;
 
     #[allow(clippy::result_large_err)] // the type is the handshake API's, not ours
     let callback = move |request: &Request, response: Response| -> HandshakeResult {
