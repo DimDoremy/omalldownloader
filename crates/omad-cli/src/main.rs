@@ -521,34 +521,6 @@ impl Paths {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_http_and_https_are_accepted() {
-        assert!(parse_url("https://example.com/a").is_ok());
-        assert!(parse_url("http://example.com/a").is_ok());
-        assert!(parse_url("file:///etc/passwd").is_err());
-        assert!(parse_url("javascript:alert(1)").is_err());
-        assert!(parse_url("not a url").is_err());
-    }
-
-    #[test]
-    fn ids_are_accepted_with_or_without_the_prefix() {
-        assert_eq!(parse_id("tsk_12").unwrap(), TaskId(12));
-        assert_eq!(parse_id("12").unwrap(), TaskId(12));
-        assert!(parse_id("nope").is_err());
-    }
-
-    #[test]
-    fn bytes_are_shown_in_the_unit_that_fits() {
-        assert_eq!(human_bytes(512), "512 B");
-        assert_eq!(human_bytes(1024), "1.0 KB");
-        assert_eq!(human_bytes(3 * 1024 * 1024), "3.0 MB");
-    }
-}
-
 /// The native-messaging loop: length-prefixed JSON in, length-prefixed JSON out.
 ///
 /// Each request becomes a `POST /rpc` to the running app, so this process holds no state
@@ -607,5 +579,33 @@ fn native_host(port: u16) -> anyhow::Result<()> {
         output.write_all(&(bytes.len() as u32).to_le_bytes())?;
         output.write_all(bytes)?;
         output.flush()?;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_http_and_https_are_accepted() {
+        assert!(parse_url("https://example.com/a").is_ok());
+        assert!(parse_url("http://example.com/a").is_ok());
+        assert!(parse_url("file:///etc/passwd").is_err());
+        assert!(parse_url("javascript:alert(1)").is_err());
+        assert!(parse_url("not a url").is_err());
+    }
+
+    #[test]
+    fn ids_are_accepted_with_or_without_the_prefix() {
+        assert_eq!(parse_id("tsk_12").unwrap(), TaskId(12));
+        assert_eq!(parse_id("12").unwrap(), TaskId(12));
+        assert!(parse_id("nope").is_err());
+    }
+
+    #[test]
+    fn bytes_are_shown_in_the_unit_that_fits() {
+        assert_eq!(human_bytes(512), "512 B");
+        assert_eq!(human_bytes(1024), "1.0 KB");
+        assert_eq!(human_bytes(3 * 1024 * 1024), "3.0 MB");
     }
 }
