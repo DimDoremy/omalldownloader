@@ -82,6 +82,24 @@ The popup lists every task with its status, progress, size and live speed, offer
 Resume and Remove per task, and shows a running total at the top. It reads the same
 `omad tasks --json` the window and the CLI read.
 
+## When a download fails
+
+Two things make real file hosts refuse a request that a browser would have made, and the
+app now does both:
+
+* **`Referer`** — many hosts answer 403 to a request without the page it came from. The
+  extension passes the page, the app stores it with the task, and a resumed download sends
+  it again.
+* **A browser user agent** — hosts treat anything else as a robot. `OMAD_USER_AGENT`
+  overrides it.
+
+Names come from three places, in this order: the name the browser found
+(`Content-Disposition`), the URL, then the server's answer to a probe. A link like
+`…/get?id=42` therefore lands as `pond-linux-2024.iso`, not `download`.
+
+When a host refuses `HEAD` (403 is common), the probe asks with a ranged `GET` instead, and
+a host that cannot do ranges still downloads — over one connection.
+
 ## Releases
 
 Tagged releases attach `OmaLLDownloader-x86_64.AppImage` (built by

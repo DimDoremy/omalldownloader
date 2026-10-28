@@ -95,11 +95,10 @@ impl ProbeSource for HttpProbe {
                 .await
                 .map_err(|e| ProbeError::Transport(e.to_string()))?;
 
-            // A server may refuse HEAD. An empty ranged GET is the next best thing and
-            // is what many CDNs expect.
-            let response = if response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED
-                || response.status() == reqwest::StatusCode::NOT_IMPLEMENTED
-            {
+            // A server may refuse HEAD — 405 and 501 say so, and plenty of file hosts
+            // answer 403 to *any* HEAD while serving GET happily. An empty ranged GET is
+            // the next best question, and it is the one a browser asks.
+            let response = if !response.status().is_success() {
                 self.client
                     .get(current.as_str())
                     .header(reqwest::header::RANGE, "bytes=0-0")

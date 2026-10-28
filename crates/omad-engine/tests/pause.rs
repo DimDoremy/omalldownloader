@@ -135,6 +135,7 @@ async fn pausing_stops_promptly_and_keeps_what_was_written() {
         chunk_size: 256 * 1024,
         policy: omad_core::ssrf::UrlPolicy::permissive(),
         user_agent: None,
+        referer: None,
     })
     .unwrap();
 
@@ -263,6 +264,7 @@ async fn pausing_before_the_first_byte_is_also_a_pause() {
         chunk_size: 256 * 1024,
         policy: omad_core::ssrf::UrlPolicy::permissive(),
         user_agent: None,
+        referer: None,
     })
     .unwrap();
     let watcher = Arc::new(Watcher::default());

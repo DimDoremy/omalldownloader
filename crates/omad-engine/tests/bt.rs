@@ -45,6 +45,7 @@ async fn a_magnet_link_is_handed_to_the_torrent_engine_and_pauses() {
         chunk_size: 256 * 1024,
         policy: omad_core::ssrf::UrlPolicy::permissive(),
         user_agent: None,
+        referer: None,
     })
     .unwrap();
 

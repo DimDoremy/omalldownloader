@@ -132,6 +132,7 @@ impl BridgeHost for Desktop {
                         file_path: path.to_string_lossy().to_string(),
                         connections: 4,
                         allow_private: true,
+                        referer: None,
                     })
                     .expect("a record");
                 board.lock().unwrap().push(TaskView {
@@ -198,6 +199,7 @@ impl BridgeHost for Desktop {
                     chunk_size: 64 * 1024,
                     policy: UrlPolicy::permissive(),
                     user_agent: None,
+                    referer: None,
                 })
                 .expect("an engine");
                 let (_tx, rx) = tokio::sync::watch::channel(false);

@@ -240,6 +240,7 @@ fn engine() -> Engine {
         chunk_size: 64 * 1024,
         policy: omad_core::ssrf::UrlPolicy::permissive(),
         user_agent: None,
+        referer: None,
     })
     .unwrap()
 }

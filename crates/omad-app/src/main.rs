@@ -73,6 +73,8 @@ fn main() {
 enum Command {
     Add {
         url: String,
+        /// The name the browser would have used, when it had one.
+        filename: Option<String>,
         origin: Option<String>,
         referer: Option<String>,
         allow_private: bool,
@@ -190,6 +192,7 @@ impl Service {
                 match command {
                     Command::Add {
                         url,
+                        filename,
                         origin,
                         referer,
                         allow_private,
@@ -202,7 +205,7 @@ impl Service {
                             stops: stops_for_engine.clone(),
                         };
                         if let Err(error) =
-                            add_and_run(target, url, origin, referer, allow_private).await
+                            add_and_run(target, url, filename, origin, referer, allow_private).await
                         {
                             tracing::warn!(%error, "a task could not be added");
                         }
@@ -325,8 +328,9 @@ struct EngineTarget {
 async fn add_and_run(
     target: EngineTarget,
     url: String,
+    filename: Option<String>,
     origin: Option<String>,
-    _referer: Option<String>,
+    referer: Option<String>,
     allow_private: bool,
 ) -> anyhow::Result<()> {
     // An ed2k link is not a URL this program can hold; a local client downloads it instead.
@@ -335,7 +339,7 @@ async fn add_and_run(
         return Ok(());
     }
     let parsed = url::Url::parse(&url)?;
-    let name = omad_core::filename::from_url(&parsed);
+    let name = choose_name(&parsed, filename, allow_private).await;
     // The path is built from a validated root and a sanitised name; the caller never
     // supplies either (R2).
     let path = target.root.resolve(None, &name)?;
@@ -351,18 +355,22 @@ async fn add_and_run(
         file_path: path.to_string_lossy().to_string(),
         connections,
         allow_private,
+        referer: referer.clone(),
     })?;
     target.board.update_from_record(&record);
     let _ = origin;
 
     run_task(
         target,
-        record.id,
-        parsed,
-        path,
-        None,
-        connections,
-        allow_private,
+        RunRequest {
+            id: record.id,
+            url: parsed,
+            path,
+            resume: None,
+            connections,
+            allow_private,
+            referer,
+        },
     )
     .await
 }
@@ -379,12 +387,15 @@ async fn resume_existing(target: EngineTarget, record: TaskRecord) -> anyhow::Re
     let allow_private = record.allow_private;
     run_task(
         target,
-        record.id,
-        parsed,
-        path,
-        plan,
-        connections,
-        allow_private,
+        RunRequest {
+            id: record.id,
+            url: parsed,
+            path,
+            resume: plan,
+            connections,
+            allow_private,
+            referer: record.referer.clone(),
+        },
     )
     .await
 }
@@ -441,20 +452,33 @@ impl StoreSink for Commit {
     }
 }
 
-async fn run_task(
-    target: EngineTarget,
+/// Everything a run needs that is not the target itself.
+struct RunRequest {
     id: TaskId,
     url: url::Url,
     path: PathBuf,
     resume: Option<Plan>,
     connections: u8,
     allow_private: bool,
-) -> anyhow::Result<()> {
+    referer: Option<String>,
+}
+
+async fn run_task(target: EngineTarget, request: RunRequest) -> anyhow::Result<()> {
+    let RunRequest {
+        id,
+        url,
+        path,
+        resume,
+        connections,
+        allow_private,
+        referer,
+    } = request;
     let engine = Engine::new(EngineConfig {
         max_connections: connections,
         chunk_size: 4 * 1024 * 1024,
         policy: UrlPolicy { allow_private },
-        user_agent: None,
+        user_agent: std::env::var("OMAD_USER_AGENT").ok(),
+        referer,
     })?;
     let commit = Arc::new(Commit {
         store: target.store.clone(),
@@ -481,6 +505,7 @@ impl EngineHost for Service {
         let state = self.state.lock().unwrap();
         let _ = self.commands.send(Command::Add {
             url,
+            filename: None,
             origin: state.origin.clone(),
             referer: state.referer.clone(),
             // A link typed into the window is the user's own request, so loopback and the
@@ -592,6 +617,47 @@ fn window_bounds_from_env() -> Option<odk::ui::gpui::WindowBounds> {
     ))
 }
 
+/// The name a task will be saved under.
+///
+/// The browser's own name wins: it is what the user saw in the browser's download bar, and
+/// it is often the only name a link has (`.../download?id=7` has none). Next the URL, then
+/// whatever the server says in `Content-Disposition` — asked for with the same `Referer` a
+/// browser would send, because a host that guards its files refuses the question otherwise.
+async fn choose_name(url: &url::Url, given: Option<String>, allow_private: bool) -> String {
+    if let Some(given) = given
+        .map(|name| name.trim().to_string())
+        .filter(|n| !n.is_empty())
+    {
+        let clean = omad_core::filename::sanitize(&given);
+        if !clean.is_empty() {
+            return clean;
+        }
+    }
+
+    let from_url = omad_core::filename::from_url(url);
+    let placeholder = from_url.is_empty()
+        || from_url.eq_ignore_ascii_case("download")
+        || from_url.eq_ignore_ascii_case("file");
+    if !placeholder {
+        return from_url;
+    }
+
+    let policy = UrlPolicy { allow_private };
+    match omad_engine::probe(url, &policy).await {
+        Ok(outcome) => match outcome.probe.suggested_filename {
+            Some(name) => {
+                let clean = omad_core::filename::sanitize(&name);
+                if !clean.is_empty() {
+                    return clean;
+                }
+                from_url
+            }
+            None => from_url,
+        },
+        Err(_) => from_url,
+    }
+}
+
 /// Where the extension bridge listens.
 ///
 /// One fixed loopback port, so a freshly installed extension finds the app without being
@@ -659,6 +725,7 @@ impl BridgeHost for WindowBridge {
         self.commands
             .send(Command::Add {
                 url: task.url.clone(),
+                filename: task.filename.clone(),
                 origin: Some(origin.to_string()),
                 referer: task.referer.clone(),
                 allow_private: false,

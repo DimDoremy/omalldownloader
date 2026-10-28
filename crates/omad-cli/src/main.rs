@@ -184,6 +184,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             // command line as a path.
             let path = root.resolve(None, &deduplicate(&root, &proposed))?;
             let record = store.create(NewTask {
+                referer: None,
                 url: url.clone(),
                 filename: path.file_name().unwrap().to_string_lossy().to_string(),
                 dest: "downloads".into(),
@@ -328,6 +329,7 @@ fn download(
         chunk_size: 4 * 1024 * 1024,
         policy,
         user_agent: None,
+        referer: None,
     })?;
 
     // A record the engine can consult on a crash: same file, same plan.

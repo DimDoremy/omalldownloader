@@ -29,6 +29,10 @@ pub struct EngineConfig {
     /// Extra headers that are safe to send: the engine refuses to forward a
     /// credential-bearing header to a different origin than the one that produced it.
     pub user_agent: Option<String>,
+    /// The page a download was started from. Many sites refuse a file whose request has no
+    /// `Referer` (hotlink protection), and a browser would have sent it, so this is passed
+    /// through exactly as the browser gave it.
+    pub referer: Option<String>,
 }
 
 impl Default for EngineConfig {
@@ -38,9 +42,15 @@ impl Default for EngineConfig {
             chunk_size: 4 * 1024 * 1024,
             policy: UrlPolicy::default(),
             user_agent: None,
+            referer: None,
         }
     }
 }
+
+/// What the window says it is. A browser's user agent, because file hosts treat anything
+/// else as a robot; `OMAD_USER_AGENT` overrides it for a site that needs something else.
+pub const DEFAULT_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
+     (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
 
 #[derive(Clone, Debug, Default)]
 pub struct Progress {
@@ -213,13 +223,26 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(config: EngineConfig) -> anyhow::Result<Self> {
+        let mut headers = reqwest::header::HeaderMap::new();
+        if let Some(referer) = &config.referer
+            && let Ok(value) = reqwest::header::HeaderValue::from_str(referer)
+        {
+            headers.insert(reqwest::header::REFERER, value);
+        }
+        // A browser-like agent by default: a great many file hosts answer 403 to anything
+        // that is not a browser, and this engine is standing in for one.
+        let agent = config
+            .user_agent
+            .clone()
+            .unwrap_or_else(|| DEFAULT_AGENT.to_string());
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(15))
             // No overall timeout: a big file takes as long as it takes. Idle detection
             // is the per-read timeout below.
             .read_timeout(Duration::from_secs(60))
             .redirect(reqwest::redirect::Policy::none())
-            .user_agent(concat!("OmaLLDownloader/", env!("CARGO_PKG_VERSION")))
+            .user_agent(agent)
+            .default_headers(headers)
             .build()?;
         Ok(Self { config, client })
     }

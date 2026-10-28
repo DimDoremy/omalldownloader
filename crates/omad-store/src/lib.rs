@@ -52,6 +52,7 @@ pub struct TaskRecord {
     /// The user allowed this task to reach a loopback or private address. Kept with the
     /// task so a resume honours the decision instead of asking again, or silently refusing.
     pub allow_private: bool,
+    pub referer: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -85,6 +86,9 @@ pub struct NewTask {
     pub file_path: String,
     pub connections: u8,
     pub allow_private: bool,
+    /// The page the link came from. Kept so a resumed download sends the same `Referer` a
+    /// browser would; a host that guards its files refuses the request otherwise.
+    pub referer: Option<String>,
 }
 
 /// What a restart needs from the record: the chunk plan and the digest it must match.
@@ -96,7 +100,7 @@ pub struct Store {
 }
 
 const COLUMNS: &str = "id, url, filename, dest, status, total_bytes, received_bytes,
-        speed, connections, etag, file_path, error, plan, expected_sha256, allow_private,
+        speed, connections, etag, file_path, error, plan, expected_sha256, allow_private, referer,
         created_at, updated_at";
 
 impl Store {
@@ -150,6 +154,7 @@ impl Store {
                 plan            TEXT,
                 expected_sha256 TEXT,
                 allow_private   INTEGER NOT NULL DEFAULT 0,
+                referer         TEXT,
                 created_at      INTEGER NOT NULL,
                 updated_at      INTEGER NOT NULL
             );
@@ -164,10 +169,16 @@ impl Store {
         )?;
         // A store from before this column existed gains it here; `user_version` would be
         // the tidier record, but one additive column does not need a migration framework.
-        let has_column: bool = conn
+        let has_referer: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('tasks') WHERE name = 'referer'")?
+            .exists([])?;
+        if !has_referer {
+            conn.execute_batch("ALTER TABLE tasks ADD COLUMN referer TEXT")?;
+        }
+        let has_private: bool = conn
             .prepare("SELECT 1 FROM pragma_table_info('tasks') WHERE name = 'allow_private'")?
             .exists([])?;
-        if !has_column {
+        if !has_private {
             conn.execute_batch(
                 "ALTER TABLE tasks ADD COLUMN allow_private INTEGER NOT NULL DEFAULT 0",
             )?;
@@ -202,8 +213,9 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO tasks (url, filename, dest, status, total_bytes, received_bytes,
-                                connections, file_path, allow_private, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, NULL, 0, ?5, ?6, ?7, ?8, ?8)",
+                                connections, file_path, allow_private, referer,
+                                created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, NULL, 0, ?5, ?6, ?7, ?8, ?9, ?9)",
             params![
                 new.url,
                 new.filename,
@@ -212,6 +224,7 @@ impl Store {
                 new.connections,
                 new.file_path,
                 new.allow_private as i64,
+                new.referer,
                 now
             ],
         )?;
@@ -381,8 +394,9 @@ fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
         plan: r.get(12)?,
         expected_sha256: r.get(13)?,
         allow_private: r.get::<_, i64>(14)? != 0,
-        created_at: r.get(15)?,
-        updated_at: r.get(16)?,
+        referer: r.get(15)?,
+        created_at: r.get(16)?,
+        updated_at: r.get(17)?,
     })
 }
 
@@ -422,6 +436,7 @@ mod tests {
             file_path: format!("/tmp/{name}"),
             connections: 8,
             allow_private: false,
+            referer: None,
         }
     }
 
@@ -466,6 +481,27 @@ mod tests {
         assert_eq!(t.etag.as_deref(), Some("\"etag1\""));
         assert_eq!(t.status, TaskStatus::Running);
         assert_eq!(store.resumable().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_task_keeps_the_page_it_came_from() {
+        let store = Store::open_in_memory().unwrap();
+        let record = store
+            .create(NewTask {
+                url: "https://example.com/get?id=42".into(),
+                filename: "pond-linux-2024.iso".into(),
+                dest: "downloads".into(),
+                file_path: "/tmp/pond-linux-2024.iso".into(),
+                connections: 4,
+                allow_private: false,
+                referer: Some("https://example.com/page".into()),
+            })
+            .unwrap();
+        assert_eq!(record.referer.as_deref(), Some("https://example.com/page"));
+        assert_eq!(record.filename, "pond-linux-2024.iso");
+        // And a restart sees the same record.
+        let again = store.get(record.id).unwrap().unwrap();
+        assert_eq!(again.referer.as_deref(), Some("https://example.com/page"));
     }
 
     #[test]

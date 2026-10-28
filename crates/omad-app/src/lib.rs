@@ -1056,6 +1056,7 @@ mod tests {
             plan: None,
             expected_sha256: None,
             allow_private: false,
+            referer: None,
             created_at: 0,
             updated_at: 0,
         }

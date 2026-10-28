@@ -106,6 +106,7 @@ async fn child_downloader() {
         chunk_size: 256 * 1024,
         policy: omad_core::ssrf::UrlPolicy::permissive(),
         user_agent: None,
+        referer: None,
     })
     .unwrap();
     let sink = Arc::new(Watch(
@@ -192,6 +193,7 @@ fn a_killed_download_resumes_to_an_identical_file() {
             chunk_size: 256 * 1024,
             policy: omad_core::ssrf::UrlPolicy::permissive(),
             user_agent: None,
+            referer: None,
         })
         .unwrap();
         struct Quiet;
