@@ -104,7 +104,9 @@ pub fn deduplicate(raw: &str, taken: impl Fn(&str) -> bool) -> String {
         Some(i) if i > 0 => (&raw[..i], &raw[i..]),
         _ => (raw, ""),
     };
-    for n in 2..10_000u32 {
+    // The first copy keeps its name; the next one is " (1)", the way every browser and
+    // file manager numbers them.
+    for n in 1..10_000u32 {
         let candidate = format!("{stem} ({n}){ext}");
         if !taken(&candidate) {
             return candidate;
@@ -284,8 +286,8 @@ mod tests {
 
     #[test]
     fn deduplicates_like_a_file_manager() {
-        let taken = |n: &str| n == "a.txt" || n == "a (2).txt";
-        assert_eq!(deduplicate("a.txt", taken), "a (3).txt");
+        let taken = |n: &str| n == "a.txt" || n == "a (1).txt";
+        assert_eq!(deduplicate("a.txt", taken), "a (2).txt");
         assert_eq!(deduplicate("b.txt", taken), "b.txt");
     }
 
