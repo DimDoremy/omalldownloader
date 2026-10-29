@@ -1,8 +1,18 @@
 # OmaLLDownloader
 
-A cross-platform download manager with a browser extension — the shape of Ghost Downloader,
-built on ODK's design language. Linux first; the Windows and macOS targets are not
-verified yet (see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
+** **English** | [简体中文](README.zh-CN.md)
+
+> **This is a personal, vibe-coded project.** It is written for one person's own desktop,
+> mostly by describing what I wanted and letting an agent write the code, and it is shared
+> only because it might be useful to someone else. It is not production software: there is
+> no support, no release cadence, no stability promise, and interfaces change whenever they
+> need to. Expect rough edges. If you need a download manager you can rely on, use
+> [aria2](https://aria2.github.io/), [Motrix](https://motrix.app/) or
+> [Ghost Downloader](https://github.com/XiaoYouChR/Ghost-Downloader-3).
+
+A download manager with a browser extension — the shape of Ghost Downloader, built on ODK's
+design language. Linux first (Omarchy is the target), macOS builds, Windows only builds in
+CI (see [`docs/PLATFORMS.md`](docs/PLATFORMS.md)).
 
 ![the task list](docs/assets/tasks.png)
 
@@ -17,7 +27,7 @@ crates/omad-store    SQLite task records, resumable across restarts
 crates/omad-engine   chunked HTTP(S) with range requests, resume and digest verification
 crates/omad-rpc      the loopback bridge the Chrome extension talks to
 crates/omad-app      the GPUI window (ODK components, ODK theme)
-crates/omad-cli        `omalld`, the command line
+crates/omad-cli        `omalld`, the command line (and the native-messaging host)
 crates/omad-app-tests  the window's tests, apart so `test-support` never ships
 extension/             the Chrome extension (Manifest V3, no bundler)
 packaging/             the Omarchy desktop entry, icon and bar widget, plus the installer
@@ -28,8 +38,8 @@ tools/shot-omarchy.sh  a screenshot on a private headless output, without touchi
 
 ```sh
 cargo run -p omad-app            # the window
-cargo build -p omad-cli          # target/debug/omad
-cargo test --workspace         # 84 tests, no network needed
+cargo build -p omad-cli          # target/debug/omalld
+cargo test --workspace           # 114 tests, no network needed
 ```
 
 The CLI:
@@ -123,6 +133,13 @@ Names come from three places, in this order: the name the browser found
 When a host refuses `HEAD` (403 is common), the probe asks with a ranged `GET` instead, and
 a host that cannot do ranges still downloads — over one connection.
 
+## Download list, names and folders
+
+* the extension announces every taken download and the popup shows the live list;
+* a name that is already taken becomes `name (1).ext`, `name (2).ext`;
+* downloads are sorted into folders by extension, configured in
+  `~/.config/omalldownloader/categories.json` — see [`docs/CATEGORIES.md`](docs/CATEGORIES.md).
+
 ## Releases
 
 Tagged releases attach `OmaLLDownloader-x86_64.AppImage` (built by
@@ -188,9 +205,11 @@ with a stand-in bridge that speaks the same protocol, then downloads 120 KB, 300
 480 KB files from a local server. It asserts the tasks arrive with their names and referer,
 and that the browser's own copies were cancelled.
 
-Load `extension/dist` in Chrome (*chrome://extensions* → *Load unpacked*). Then, in the
-desktop app, open **Browser extension**, press **Start pairing** and copy the address and
-the six-digit code into the extension popup. The code is single use.
+Load `extension/dist` in Edge or Chrome (*edge://extensions* → *Load unpacked*). There is
+nothing to type: the extension tries the browser's native-messaging pipe first, then
+`ws://127.0.0.1:14370`, then `POST /rpc` on the same port, and the app hands it a secret on
+first contact. `packaging/install-omarchy.sh` installs the native-messaging host manifest
+for every browser it finds.
 
 **Firefox is not built.** The extension is Manifest V3 without `webRequest`; a Gecko build
 would need `sidebar_action`, a different download seam (`downloads.onCreated`, since
@@ -210,3 +229,5 @@ world content scripts. The review documents why.
 ## Licence
 
 MIT. Ghost Downloader 3 is GPL v3; its behaviour was studied, its code was not copied.
+
+[简体中文说明](README.zh-CN.md)
