@@ -14,3 +14,9 @@ macOS, where libc already has it.
 
 Both should go upstream. Until they do, `cargo update` on ODK means re-applying these three
 edits; they are listed here so that is a five-minute job rather than an archaeology one.
+
+## Licence
+
+ODK is MIT (see `LICENSE` in this directory, copied from the upstream project's
+`Cargo.toml` licence field). The patches listed here are released under the same MIT terms
+as the rest of OmaLLDownloader.
