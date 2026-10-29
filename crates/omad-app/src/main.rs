@@ -204,12 +204,19 @@ impl Service {
                             sink: sink.clone() as Arc<dyn StoreSink>,
                             stops: stops_for_engine.clone(),
                         };
-                        if let Err(error) =
-                            add_and_run(target, url, filename, origin, referer, allow_private).await
-                        {
-                            tracing::warn!(%error, "a task could not be added");
-                        }
-                        wake_service.wake();
+                        // Spawned, not awaited: a download takes minutes, and the loop has
+                        // to keep answering Remove, Pause and Add while it runs. Awaiting
+                        // here is why "remove" appeared to do nothing.
+                        let wake = wake_service.clone();
+                        tokio::spawn(async move {
+                            if let Err(error) =
+                                add_and_run(target, url, filename, origin, referer, allow_private)
+                                    .await
+                            {
+                                tracing::warn!(%error, "a task could not be added");
+                            }
+                            wake.wake();
+                        });
                     }
                     Command::Pause(id) => {
                         // Ask the engine to stop at its next read. It commits what it wrote
@@ -237,10 +244,13 @@ impl Service {
                                 sink: sink.clone() as Arc<dyn StoreSink>,
                                 stops: stops_for_engine.clone(),
                             };
-                            if let Err(error) = resume_existing(target, record).await {
-                                tracing::warn!(%error, "a task could not be resumed");
-                            }
-                            wake_service.wake();
+                            let wake = wake_service.clone();
+                            tokio::spawn(async move {
+                                if let Err(error) = resume_existing(target, record).await {
+                                    tracing::warn!(%error, "a task could not be resumed");
+                                }
+                                wake.wake();
+                            });
                         }
                     }
                     Command::Remove(id) => {

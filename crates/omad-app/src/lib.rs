@@ -862,6 +862,9 @@ pub struct TaskBoard {
     /// reports faster and more accurately than the record; the store is not consulted for
     /// them.
     owned: Mutex<std::collections::HashSet<u64>>,
+    /// Rows the user removed here. The store mirror must not put them back while a
+    /// running task is still finishing its last write.
+    removed: Mutex<std::collections::HashSet<u64>>,
 }
 
 impl TaskBoard {
@@ -870,6 +873,7 @@ impl TaskBoard {
     }
 
     pub fn update_from_record(&self, record: &TaskRecord) {
+        self.removed.lock().unwrap().remove(&record.id.0);
         let mut rows = self.rows.lock().unwrap();
         let row = Row {
             id: record.id.0,
@@ -890,6 +894,9 @@ impl TaskBoard {
 
     pub fn remove(&self, id: u64) {
         self.rows.lock().unwrap().retain(|r| r.id != id);
+        // Remember it: the one-second mirror of the store would otherwise put the row back
+        // if a running task's write raced the delete.
+        self.removed.lock().unwrap().insert(id);
     }
 
     pub fn set_progress(&self, id: u64, received: u64, total: Option<u64>, speed: u64) {
@@ -929,6 +936,9 @@ impl TaskBoard {
         let owned: std::collections::HashSet<u64> = self.owned.lock().unwrap().clone();
         let mut rows = self.rows.lock().unwrap();
         for record in records {
+            if self.removed.lock().unwrap().contains(&record.id.0) {
+                continue;
+            }
             match rows.iter_mut().find(|r| r.id == record.id.0) {
                 Some(_) if owned.contains(&record.id.0) => {}
                 Some(row) => {
