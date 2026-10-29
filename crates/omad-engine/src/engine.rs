@@ -160,7 +160,7 @@ impl Plan {
         // forever. Workers pull these from a queue, so the count may exceed the
         // connections.
         let step = chunk_size.max(MIN_CHUNK);
-        let count = total.div_ceil(step).min(MAX_CHUNKS).max(1);
+        let count = total.div_ceil(step).clamp(1, MAX_CHUNKS);
         let mut chunks = Vec::with_capacity(count as usize);
         let step = total.div_ceil(count);
         let _ = connections;
