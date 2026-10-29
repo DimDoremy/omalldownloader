@@ -1,6 +1,6 @@
 # OmaLLDownloader
 
-** **English** | [简体中文](README.zh-CN.md)
+**English** | [简体中文](README.zh-CN.md)
 
 > **This is a personal, vibe-coded project.** It is written for one person's own desktop,
 > mostly by describing what I wanted and letting an agent write the code, and it is shared

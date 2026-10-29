@@ -145,6 +145,11 @@ chmod +x OmaLLDownloader-x86_64.AppImage
 * 不做 Firefox 扩展（Manifest V3 无 `webRequest`，需要另一套下载拦截接口）；
 * 没有自动更新、没有崩溃上报、没有多用户支持。
 
+## 从 Ghost Downloader 迁移
+
+`docs/REPLACING-GHOST-DOWNLOADER.md` 记录了本机如何卸载 Ghost Downloader 并把
+MIME 关联、通知规则、扩展交给 OmaLLDownloader。
+
 ## 许可
 
 MIT。Ghost Downloader 3 是 GPL v3：只研究了它的行为，没有复制它的代码。
