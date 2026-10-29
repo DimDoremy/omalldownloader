@@ -107,3 +107,84 @@ async fn a_host_that_refuses_head_and_ranges_still_downloads() {
     assert_eq!(*recorder.finished.lock().unwrap(), Some(Outcome::Completed));
     assert!(recorder.failed.lock().unwrap().is_none());
 }
+
+/// A chunk request must carry exactly one `If-Range`.
+///
+/// Cloudflare answers a request with two of them with 400 Bad Request, which is how a
+/// 1.4 GB download sat at 0 B while `curl` with the same headers worked.
+#[tokio::test]
+async fn a_chunk_request_sends_one_if_range_header() {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let count = Arc::new(AtomicUsize::new(0));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let recorded = seen.clone();
+    let requests = count.clone();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                break;
+            };
+            let mut buffer = [0u8; 4096];
+            let Ok(n) = socket.read(&mut buffer).await else {
+                continue;
+            };
+            let request = String::from_utf8_lossy(&buffer[..n]).to_string();
+            requests.fetch_add(1, Ordering::Relaxed);
+            recorded.lock().unwrap().push(request.clone());
+            let reply = if request.starts_with("HEAD") {
+                "HTTP/1.1 200 OK\r\nContent-Length: 1024\r\nAccept-Ranges: bytes\r\n\
+                 ETag: \"v1\"\r\nLast-Modified: Wed, 01 Jan 2025 00:00:00 GMT\r\n\
+                 Connection: close\r\n\r\n"
+                    .to_string()
+            } else {
+                format!(
+                    "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\n\
+                     Content-Range: bytes 0-1023/1024\r\nConnection: close\r\n\r\n{}",
+                    BODY.len(),
+                    String::from_utf8_lossy(BODY)
+                )
+            };
+            let _ = socket.write_all(reply.as_bytes()).await;
+            let _ = socket.shutdown().await;
+        }
+    });
+
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::new(EngineConfig {
+        max_connections: 2,
+        chunk_size: 1024,
+        policy: UrlPolicy::permissive(),
+        user_agent: None,
+        referer: None,
+    })
+    .unwrap();
+    let recorder = Arc::new(Recorder::default());
+    let (_stop, stop_rx) = tokio::sync::watch::channel(false);
+    let _ = engine
+        .run_task(
+            TaskId(2),
+            url::Url::parse(&format!("http://{addr}/f.bin")).unwrap(),
+            dir.path().join("f.bin"),
+            None,
+            2,
+            recorder,
+            stop_rx,
+            None,
+        )
+        .await;
+
+    let requests = seen.lock().unwrap().clone();
+    let ranged: Vec<&String> = requests.iter().filter(|r| r.starts_with("GET")).collect();
+    assert!(!ranged.is_empty(), "a range request was made");
+    for request in ranged {
+        let count = request.to_lowercase().matches("if-range:").count();
+        assert!(
+            count <= 1,
+            "a chunk request carried {count} If-Range headers:\n{request}"
+        );
+    }
+}

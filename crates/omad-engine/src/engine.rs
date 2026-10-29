@@ -16,6 +16,9 @@ use url::Url;
 const MIN_CHUNK: u64 = 256 * 1024;
 /// Never open more than this many connections for one task.
 pub const MAX_CONNECTIONS: u8 = 16;
+/// A cap on how many chunks a plan may hold, so a 200 GB file does not build a list of
+/// millions of entries.
+const MAX_CHUNKS: u64 = 4096;
 /// How often progress is pushed to the caller.
 const TICK: Duration = Duration::from_millis(200);
 /// How often the record is written. Losing more than this costs a re-download.
@@ -152,10 +155,15 @@ impl Plan {
                 last_modified: None,
             };
         }
-        let by_size = total.div_ceil(chunk_size.max(MIN_CHUNK)).max(1);
-        let count = connections.min(by_size).max(1);
+        // Chunks are *at most* `chunk_size`: a host may stall on a very large range (this
+        // one stalls past ~180 MB), and a chunk that never answers holds a connection
+        // forever. Workers pull these from a queue, so the count may exceed the
+        // connections.
+        let step = chunk_size.max(MIN_CHUNK);
+        let count = total.div_ceil(step).min(MAX_CHUNKS).max(1);
         let mut chunks = Vec::with_capacity(count as usize);
         let step = total.div_ceil(count);
+        let _ = connections;
         let mut start = 0u64;
         while start < total {
             let end = (start + step).min(total) - 1;
@@ -241,6 +249,9 @@ impl Engine {
             // is the per-read timeout below.
             .read_timeout(Duration::from_secs(60))
             .redirect(reqwest::redirect::Policy::none())
+            // HTTP/1.1 on purpose: some CDNs stall ranged HTTP/2 requests, and a download
+            // has nothing to gain from multiplexing several big streams over one socket.
+            .http1_only()
             .user_agent(agent)
             .default_headers(headers)
             .build()?;
@@ -602,12 +613,29 @@ impl Engine {
             return Ok(());
         }
 
-        // Chunks with work left, each on its own connection.
+        // A work queue: the plan may hold hundreds of small chunks, and only `connections`
+        // of them may be in flight. A host that stalls on one chunk therefore costs one
+        // connection, not the whole download.
+        let pending: Vec<usize> = chunks
+            .iter()
+            .enumerate()
+            .filter(|(_, chunk)| chunk.remaining() > 0)
+            .map(|(index, _)| index)
+            .collect();
+        if pending.is_empty() {
+            return Ok(());
+        }
+        let workers = (self.config.max_connections as usize)
+            .clamp(1, MAX_CONNECTIONS as usize)
+            .min(pending.len());
+        let queue = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let pending = Arc::new(pending);
+
         let mut handles = Vec::new();
-        for (index, chunk) in chunks.iter().enumerate() {
-            if chunk.remaining() == 0 {
-                continue;
-            }
+        for _ in 0..workers {
+            let pending = pending.clone();
+            let queue = queue.clone();
+            let chunks = chunks.clone();
             let target = probe.final_url.clone();
             let file = file.clone();
             let shared = shared.clone();
@@ -616,26 +644,32 @@ impl Engine {
             let etag = probe.etag.clone();
             let last_modified = probe.last_modified.clone();
             let agent = self.config.user_agent.clone();
-            let chunk = chunk.clone();
             let mut stop = stop.clone();
             let mut cancel = cancel.resubscribe();
 
             handles.push(tokio::spawn(async move {
-                chunk_worker(
-                    index,
-                    chunk,
-                    target,
-                    file,
-                    shared,
-                    policy,
-                    client,
-                    etag,
-                    last_modified,
-                    agent,
-                    &mut stop,
-                    &mut cancel,
-                )
-                .await
+                loop {
+                    let slot = queue.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(&index) = pending.get(slot) else {
+                        return Ok(());
+                    };
+                    let chunk = chunks[index].clone();
+                    chunk_worker(
+                        index,
+                        chunk,
+                        target.clone(),
+                        file.clone(),
+                        shared.clone(),
+                        policy.clone(),
+                        client.clone(),
+                        etag.clone(),
+                        last_modified.clone(),
+                        agent.clone(),
+                        &mut stop,
+                        &mut cancel,
+                    )
+                    .await?;
+                }
             }));
         }
 
@@ -824,11 +858,10 @@ async fn chunk_worker(
                 format!("bytes={from}-{}", chunk.end),
             );
         }
-        if let Some(etag) = &etag {
-            request = request.header(reqwest::header::IF_RANGE, etag);
-        }
-        if let Some(modified) = &last_modified {
-            request = request.header(reqwest::header::IF_RANGE, modified);
+        // One `If-Range`, never two: the ETag wins, because it is the stronger validator.
+        // Two of them is a malformed request, and a CDN answers that with 400.
+        if let Some(validator) = etag.as_ref().or(last_modified.as_ref()) {
+            request = request.header(reqwest::header::IF_RANGE, validator);
         }
         if let Some(agent) = &agent {
             request = request.header(reqwest::header::USER_AGENT, agent);
