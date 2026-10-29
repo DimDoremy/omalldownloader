@@ -139,15 +139,15 @@ fn the_window_paints_the_rail_the_toolbar_and_the_controls() {
 
     // The frame was painted: the parts a user interacts with have real bounds.
     assert!(
-        bounds(visual, "nav-tasks/button").is_some(),
+        bounds(visual, "nav-tasks").is_some(),
         "the rail has a Tasks entry"
     );
     assert!(
-        bounds(visual, "nav-add/button").is_some(),
+        bounds(visual, "nav-add").is_some(),
         "the rail has an Add entry"
     );
     assert!(
-        bounds(visual, "nav-settings/button").is_some(),
+        bounds(visual, "nav-settings").is_some(),
         "the rail has a Settings entry"
     );
     assert!(
@@ -308,7 +308,7 @@ fn the_add_page_takes_a_link_and_hands_it_over() {
     let mut cx = TestAppContext::single();
     let (visual, entity) = open(&mut cx, host.clone());
 
-    click(visual, "nav-add/button");
+    click(visual, "nav-add");
     assert_eq!(entity.read_with(visual, |v, _| v.summary().1), "add");
 
     click(visual, "url/box");
@@ -334,7 +334,7 @@ fn an_empty_link_is_not_sent() {
     let mut cx = TestAppContext::single();
     let (visual, _entity) = open(&mut cx, host.clone());
 
-    click(visual, "nav-add/button");
+    click(visual, "nav-add");
     click(visual, "add/button");
 
     assert!(
@@ -349,7 +349,7 @@ fn the_extension_page_shows_the_address_and_connects_without_a_code() {
     let mut cx = TestAppContext::single();
     let (visual, entity) = open(&mut cx, host.clone());
 
-    click(visual, "nav-extension/button");
+    click(visual, "nav-extension");
     let (_, page, address) = entity.read_with(visual, |v, _| v.summary());
     assert_eq!(page, "extension");
     assert_eq!(

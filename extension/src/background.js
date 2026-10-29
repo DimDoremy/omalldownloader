@@ -161,6 +161,7 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener(async (request) => {
     switch (request?.type) {
       case "state":
+        desktopBridge.send({ type: MSG.LIST_TASKS });
         port.postMessage({
           type: "state",
           connected: taskState.connected,

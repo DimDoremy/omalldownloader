@@ -350,9 +350,19 @@ async fn add_and_run(
     }
     let parsed = url::Url::parse(&url)?;
     let name = choose_name(&parsed, filename, allow_private).await;
+    // Where the file goes: a folder chosen by its extension, then the name made unique so
+    // two downloads of the same file never overwrite each other.
+    let folder = omad_core::category::folder_for(&omad_core::category::load(), &name);
+    let name = omad_core::filename::deduplicate(&name, |candidate| {
+        target
+            .root
+            .resolve(folder.as_deref(), candidate)
+            .map(|path| path.exists())
+            .unwrap_or(true)
+    });
     // The path is built from a validated root and a sanitised name; the caller never
     // supplies either (R2).
-    let path = target.root.resolve(None, &name)?;
+    let path = target.root.resolve(folder.as_deref(), &name)?;
     let connections = 8u8;
     // A link that came from the browser may not reach loopback or the LAN, unless the user
     // asked for it. `OMAD_ALLOW_PRIVATE` is the escape hatch for a local test server.

@@ -176,8 +176,13 @@ test("a released AppImage receives a download from the extension", async (t) => 
   // identifies the file; the hash below proves it is the right one.
   const written = await waitFor(() => {
     try {
-      for (const name of readdirSync(downloads)) {
-        const path = join(downloads, name);
+      // A download lands in its category folder (`ISO/`, `Video/`...), so look one level
+      // down as well as in the root.
+      const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const path = join(dir, entry.name);
+        return entry.isDirectory() ? walk(path) : [path];
+      });
+      for (const path of walk(downloads)) {
         if (statSync(path).size === CONTENT.length) { return path; }
       }
       return null;

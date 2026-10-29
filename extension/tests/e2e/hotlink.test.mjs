@@ -207,8 +207,11 @@ test("a hotlink-protected file without a name in its URL arrives with the server
 
   const saved = await waitFor(() => {
     try {
-      for (const name of readdirSync(downloads)) {
-        const path = join(downloads, name);
+      const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const path = join(dir, entry.name);
+        return entry.isDirectory() ? walk(path) : [path];
+      });
+      for (const path of walk(downloads)) {
         if (statSync(path).size === BODY.length) { return path; }
       }
       return null;
@@ -217,7 +220,9 @@ test("a hotlink-protected file without a name in its URL arrives with the server
     throw new Error(`${error.message}\napp log:\n${appLog.join("")}`);
   });
 
-  assert.equal(dirname(saved).endsWith(downloads), true);
+  // The file lands under the download folder, inside the category folder for an .iso.
+  assert.equal(saved.startsWith(downloads), true, `saved to ${saved}`);
+  assert.equal(saved.endsWith(join("ISO", NAME)), true, `saved as ${saved}`);
   assert.equal(saved.endsWith(NAME), true, `saved as ${saved}, expected the server's name`);
   const got = createHash("sha256").update(readFileSync(saved)).digest("hex");
   assert.equal(got, WANT, "the bytes are the ones the server sent");

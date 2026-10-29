@@ -139,8 +139,11 @@ test("a task can be added over the HTTP fallback when the WebSocket is blocked",
 
   const saved = await waitFor(() => {
     try {
-      for (const name of readdirSync(downloads)) {
-        const path = join(downloads, name);
+      const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const path = join(dir, entry.name);
+        return entry.isDirectory() ? walk(path) : [path];
+      });
+      for (const path of walk(downloads)) {
         if (statSync(path).size === BODY.length) { return path; }
       }
       return null;

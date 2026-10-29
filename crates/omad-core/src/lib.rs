@@ -5,6 +5,7 @@
 //! architecture test in `omad-engine/tests/architecture.rs` fails the build if a GUI or
 //! windowing crate ever reaches this layer.
 
+pub mod category;
 pub mod filename;
 pub mod i18n;
 pub mod id;

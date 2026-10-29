@@ -52,6 +52,11 @@ impl DownloadRoot {
     ///
     /// The result is guaranteed to sit strictly inside the root. It is not yet
     /// created; [`Self::open_exclusive`] is the step that cannot be raced.
+    /// The root itself, for callers that need to look around in it.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     pub fn resolve(&self, subdir: Option<&str>, name: &str) -> Result<PathBuf, PathError> {
         let mut target = self.path.clone();
 
@@ -77,6 +82,13 @@ impl DownloadRoot {
             }
         }
 
+        // The category folder is created on demand: a download into `ISO/` should not fail
+        // because the folder does not exist yet.
+        if let Some(parent) = target.parent()
+            && !parent.exists()
+        {
+            let _ = std::fs::create_dir_all(parent);
+        }
         target.push(name);
 
         // `..` cannot survive the loop above, but a symlink inside the root can point

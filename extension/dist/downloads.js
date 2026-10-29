@@ -133,6 +133,24 @@ export async function onDeterminingFilename(item, suggest) {
 }
 
 /**
+ * Says the download was taken, so the browser's own list does not look like the place to
+ * look. Ghost Downloader did the same, and without it a taken download is simply invisible.
+ */
+async function announceTaken(name) {
+  const id = `taken-${Date.now()}`;
+  chrome.notifications?.create(id, {
+    type: "basic",
+    iconUrl: "icon128.png",
+    title: "Added to OmaLLDownloader",
+    message: name,
+    priority: 0,
+  });
+  setTimeout(() => chrome.notifications?.clear(id), 4000);
+  // The popup list is the record of what happened; refresh it now instead of at the next poll.
+  desktopBridge.send({ type: MSG.LIST_TASKS });
+}
+
+/**
  * Says the desktop is not reachable and offers to open it.
  *
  * The download has already gone back to the browser, so nothing is lost; this explains

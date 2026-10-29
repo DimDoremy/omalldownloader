@@ -324,23 +324,34 @@ impl Tasks {
             active: bool,
             cx: &mut Context<Tasks>,
         ) -> AnyElement {
-            Button::new(SharedString::from(format!("nav-{id}")))
-                .full_width()
-                .variant(if active {
-                    ButtonVariant::Secondary
-                } else {
-                    ButtonVariant::Ghost
-                })
-                .label(if let Some(count) = counter {
-                    format!("{glyph}   {label}   {count}")
-                } else {
-                    format!("{glyph}   {label}")
-                })
+            let mut row = h_flex()
+                .id(SharedString::from(format!("nav-{id}")))
+                .debug_selector(move || format!("nav-{id}"))
+                .w_full()
+                .px(Space::Sm)
+                .py(px(6.0))
+                .gap(Space::Sm)
+                .items_center()
+                .rounded(px(6.0))
+                .cursor_pointer()
+                .when(active, |el| el.bg(accent_soft()))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.page = page;
                     cx.notify();
                 }))
-                .into_any_element()
+                // The fixed column is the point: every icon starts at the same x, whatever
+                // its glyph's advance width.
+                .child(
+                    div()
+                        .w(px(18.0))
+                        .flex_shrink_0()
+                        .child(Text::new(glyph).muted()),
+                )
+                .child(Text::new(label));
+            if let Some(count) = counter {
+                row = row.child(Text::new(count).muted());
+            }
+            row.into_any_element()
         }
 
         v_flex()

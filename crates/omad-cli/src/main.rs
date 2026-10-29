@@ -193,7 +193,11 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             };
             // The path comes from a validated root and a sanitised name, never from the
             // command line as a path.
-            let path = root.resolve(None, &deduplicate(&root, &proposed))?;
+            let folder = omad_core::category::folder_for(&omad_core::category::load(), &proposed);
+            let path = root.resolve(
+                folder.as_deref(),
+                &deduplicate(&root, folder.as_deref(), &proposed),
+            )?;
             let record = store.create(NewTask {
                 referer: None,
                 url: url.clone(),
@@ -459,9 +463,9 @@ fn parse_id(text: &str) -> anyhow::Result<TaskId> {
     TaskId::parse(text).ok_or_else(|| anyhow::anyhow!("{text} is not a task id"))
 }
 
-fn deduplicate(root: &omad_core::path::DownloadRoot, name: &str) -> String {
+fn deduplicate(root: &omad_core::path::DownloadRoot, folder: Option<&str>, name: &str) -> String {
     filename::deduplicate(name, |candidate| {
-        root.resolve(None, candidate)
+        root.resolve(folder, candidate)
             .map(|p| p.exists())
             .unwrap_or(true)
     })
